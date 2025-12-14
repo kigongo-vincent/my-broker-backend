@@ -10,4 +10,7 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 	posts.Post("/", func(c *fiber.Ctx) error {
 		return CreatePost(c, db)
 	})
+	posts.Get("/", func(c *fiber.Ctx) error {
+		return GetPaginatedPosts(c, db)
+	})
 }

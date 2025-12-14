@@ -1,10 +1,10 @@
 services:
   database:
     image: postgres
-    container_name: my-broker-db
+    container_name: my-broker-db2
 
     environment:
-      - POSTGRES_DB=my_broker_db 
+      - POSTGRES_DB=my_broker_db2
       - POSTGRES_USER=admin
       - POSTGRES_PASSWORD=Admin@2025 
     

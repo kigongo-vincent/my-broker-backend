@@ -5,9 +5,7 @@ import (
 	"log"
 	"os"
 
-	post "github.com/kigongo-vincent/my-broker-backend/Post"
 	user "github.com/kigongo-vincent/my-broker-backend/User"
-	"github.com/kigongo-vincent/my-broker-backend/chat"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -24,7 +22,7 @@ func ConnectToDB() *gorm.DB {
 	}
 	fmt.Println("Connected to DB successully!")
 
-	DB.AutoMigrate(&user.User{}, &post.Post{}, &chat.Message{}, &chat.Room{})
+	DB.AutoMigrate(&user.User{}, &user.Post{}, &user.Room{}, &user.Message{})
 
 	return DB
 }

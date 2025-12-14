@@ -3,13 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Document</title>
+    <title>Documentation</title>
   </head>
   <body>
+    <h1>Documentation</h1>
+    <p>API docs for <a href="" id="url"></a></p>
+    <p>comming soon....</p>
+
     <script>
-      fetch("http://localhost:3000/auth/signin", {
-        method: "POST",
-      }).then((res) => console.log(res));
+      const url = document.querySelector("#url");
+      url.innerHTML = location.href;
     </script>
   </body>
 </html>
