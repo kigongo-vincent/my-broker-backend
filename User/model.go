@@ -1,7 +1,6 @@
 package user
 
 import (
-
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
@@ -20,7 +19,7 @@ type Location struct {
 type Post struct {
 	gorm.Model
 	UserID       uint           `json:"user_id"`
-	User         User      `json:"user" gorm:"foreignKey:UserID"`
+	User         User           `json:"user" gorm:"foreignKey:UserID"`
 	Price        Price          `json:"price" gorm:"embedded;embeddedPrefix:price_"`
 	Location     Location       `json:"location" gorm:"embedded;embeddedPrefix:location_"`
 	Likers       datatypes.JSON `json:"likers" gorm:"type:json"`
@@ -39,7 +38,7 @@ type User struct {
 	PhoneNumber string `json:"phone_number" gorm:"unique" validate:"required"`
 	OTP         int    `json:"otp"`
 	Photo       string `json:"photo"`
-	Email       string
+	Email       string `json:"email" gorm:"omit-empty"`
 	LastSeen    string `json:"last_seen"`
 	Status      string `json:"status" gorm:"default:'user'"`
 	Verified    string `json:"verified" gorm:"default:false"`
@@ -49,7 +48,7 @@ type User struct {
 type Message struct {
 	gorm.Model
 	PostID     uint   `json:"post_id"`
-	Post       Post   `json:"post" gorm:"foreignKey:PostID"`
+	Post       Post   `json:"post,omitempty" gorm:"foreignKey:PostID"`
 	Text       string `json:"text"`
 	Attachment string `json:"attachment"`
 	UserID     uint   `json:"user_id"`

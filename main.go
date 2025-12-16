@@ -27,6 +27,10 @@ func main() {
 	}
 	DB := db.ConnectToDB()
 
+	app.Get("ps", func(c *fiber.Ctx) error {
+		return c.SendStatus(202)
+	})
+
 	// routes
 	user.RegisterRoutes(app, DB)
 	post.RegisterRoutes(app, DB)

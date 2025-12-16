@@ -1,7 +1,7 @@
 services:
   database:
     image: postgres
-    container_name: my-broker-db2
+    container_name: my-broker-db3
 
     environment:
       - POSTGRES_DB=my_broker_db2
