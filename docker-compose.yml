@@ -1,12 +1,12 @@
 services:
   database:
     image: postgres
-    container_name: my-broker-db3
+    container_name: my-broker-db6
 
     environment:
-      - POSTGRES_DB=my_broker_db2
+      - POSTGRES_DB=my_broker_db4
       - POSTGRES_USER=admin
       - POSTGRES_PASSWORD=Admin@2025 
     
     ports:
-      - "5432:5432"
+      - "5433:5432"

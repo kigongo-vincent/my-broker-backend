@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Broker backend</title>
+  </head>
+  <body>
+    <input type="text" />
+    <hr />
+    <input type="text" id="method" />
+    <hr />
+    <button>submit</button> <br />
+    <br />
+    <textarea rows="10" cols="30" name="" id=""></textarea>
+
+    <script>
+      const inputEl = document.querySelector("input");
+      const buttonEl = document.querySelector("button");
+      const methodEl = document.getElementById("method");
+      const responseEl = document.querySelector("textarea");
+      const baseUrl = "http://localhost:3000";
+
+      buttonEl.addEventListener("click", (e) => {
+        e.preventDefault();
+        makeQuery();
+      });
+
+      async function makeQuery() {
+        try {
+          let method = methodEl?.value;
+          const controls = {};
+          method == "post"
+            ? (controls["method"] = "POST")
+            : controls["method"] == "GET";
+
+          if (method == "post") {
+            controls["headers"] = { "Content-type": "application/json" };
+            controls["body"] = responseEl?.value;
+          }
+          const res = await fetch(baseUrl + "/" + inputEl.value, controls);
+          const data = await res.json();
+          // responseEl.value = data;
+        } catch (e) {
+          // responseEl.value = e;
+          console.log(e);
+        }
+      }
+    </script>
+  </body>
+</html>

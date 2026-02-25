@@ -27,8 +27,8 @@ func main() {
 	}
 	DB := db.ConnectToDB()
 
-	app.Get("ps", func(c *fiber.Ctx) error {
-		return c.SendStatus(202)
+	app.Get("/health", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{"msg": "connected"})
 	})
 
 	// routes
