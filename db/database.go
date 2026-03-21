@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	user "github.com/kigongo-vincent/my-broker-backend/User"
 	"gorm.io/driver/postgres"
@@ -15,7 +16,22 @@ var DBERROR error
 
 func ConnectToDB() *gorm.DB {
 
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable", os.Getenv("DB_HOST"), os.Getenv("DB_USER"), os.Getenv("DB_PASSWORD"), os.Getenv("DB_NAME"), os.Getenv("DB_PORT"))
+	sslmode := strings.TrimSpace(os.Getenv("DB_SSLMODE"))
+	if sslmode == "" {
+		sslmode = "disable"
+	}
+	dsn := fmt.Sprintf(
+		"host=%s user=%s password=%s dbname=%s port=%s sslmode=%s",
+		os.Getenv("DB_HOST"),
+		os.Getenv("DB_USER"),
+		os.Getenv("DB_PASSWORD"),
+		os.Getenv("DB_NAME"),
+		os.Getenv("DB_PORT"),
+		sslmode,
+	)
+	if cert := strings.TrimSpace(os.Getenv("DB_SSLROOTCERT")); cert != "" {
+		dsn += " sslrootcert=" + cert
+	}
 	DB, DBERROR = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if DBERROR != nil {
 		log.Fatal("failed to connect to database " + DBERROR.Error())
