@@ -15,10 +15,22 @@ import (
 func CreatePost(ctx *fiber.Ctx, db *gorm.DB) error {
 
 	var post user.Post
-	post.UserID = 1
+	userID, ok := ctx.Locals("userID").(uint)
+	if !ok || userID == 0 {
+		return ctx.Status(401).JSON(fiber.Map{"msg": "unauthorized"})
+	}
+	post.UserID = userID
 
 	if err := ctx.BodyParser(&post); err != nil {
 		return ctx.Status(400).JSON(fiber.Map{"msg": err.Error()})
+	}
+	if !post.ReviewDisclaimerAgreed {
+		return ctx.Status(400).JSON(fiber.Map{"msg": "review disclaimer must be accepted"})
+	}
+
+	var creator user.User
+	if err := db.First(&creator, userID).Error; err == nil && creator.Status == "admin" {
+		post.IsApproved = true
 	}
 
 	if err := db.Create(&post).First(&post).Error; err != nil {
@@ -167,17 +179,29 @@ func applyFilters(c *fiber.Ctx, query *gorm.DB, db *gorm.DB) *gorm.DB {
 
 	// Bedrooms filter
 	if bedrooms := c.Query("bedrooms"); bedrooms != "" && bedrooms != "undefined" && bedrooms != "0" {
-		query = query.Where("bedrooms = ?", bedrooms)
+		if bedrooms == "5+" || bedrooms == "more than 5" {
+			query = query.Where("bedrooms = ? OR bedrooms = ?", "5+", "more than 5")
+		} else {
+			query = query.Where("bedrooms = ?", bedrooms)
+		}
 	}
 
 	// Bathrooms filter
 	if bathrooms := c.Query("bathrooms"); bathrooms != "" && bathrooms != "undefined" && bathrooms != "0" {
-		query = query.Where("bathrooms = ?", bathrooms)
+		if bathrooms == "5+" || bathrooms == "more than 5" {
+			query = query.Where("bathrooms = ? OR bathrooms = ?", "5+", "more than 5")
+		} else {
+			query = query.Where("bathrooms = ?", bathrooms)
+		}
 	}
 
 	// Toilets filter
 	if toilets := c.Query("toilets"); toilets != "" && toilets != "undefined" && toilets != "0" {
-		query = query.Where("toilets = ?", toilets)
+		if toilets == "5+" || toilets == "more than 5" {
+			query = query.Where("toilets = ? OR toilets = ?", "5+", "more than 5")
+		} else {
+			query = query.Where("toilets = ?", toilets)
+		}
 	}
 
 	return query
@@ -186,21 +210,21 @@ func applyFilters(c *fiber.Ctx, query *gorm.DB, db *gorm.DB) *gorm.DB {
 func UpdateLikerStatus(c *fiber.Ctx, db *gorm.DB) error {
 
 	PostID, pErr := strconv.ParseUint(c.Query("post_id"), 10, 32)
-	UserID, uErr := strconv.ParseUint(c.Query("user_id"), 10, 32)
+	userID, ok := c.Locals("userID").(uint)
 	Liked, _ := strconv.ParseBool(c.Query("liked"))
 
-	if pErr != nil || uErr != nil {
+	if pErr != nil || !ok || userID == 0 {
 		return core.ThrowNewError(c, "invalid post or user id")
 	}
 
 	if Liked {
-		if err := db.Table("post_likes").Where("user_id = ? AND post_id = ?", UserID, PostID).Delete(nil).Error; err != nil {
+		if err := db.Table("post_likes").Where("user_id = ? AND post_id = ?", userID, PostID).Delete(nil).Error; err != nil {
 			return core.ThrowNewError(c, "failed to unlike")
 		}
 	} else {
 		if err := db.Table("post_likes").Clauses(clause.OnConflict{DoNothing: true}).Create(map[string]interface{}{
 			"post_id": uint(PostID),
-			"user_id": uint(UserID),
+			"user_id": userID,
 		}).Error; err != nil {
 			return core.ThrowNewError(c, "failed to like post"+err.Error())
 		}
@@ -210,15 +234,9 @@ func UpdateLikerStatus(c *fiber.Ctx, db *gorm.DB) error {
 
 }
 
-func GetPostsByCreator(c *fiber.Ctx, db *gorm.DB) error {
-
-	UserID, uErr := strconv.ParseUint(c.Query("user_id"), 10, 32)
-	if uErr != nil {
-		return core.ThrowNewError(c, "failed to get user id")
-	}
-
+func GetPostsByCreator(c *fiber.Ctx, db *gorm.DB, userID uint) error {
 	var posts []user.Post
-	if err := db.Where("user_id = ?", uint(UserID)).Preload("User").Find(&posts).Error; err != nil {
+	if err := db.Where("user_id = ?", userID).Preload("User").Find(&posts).Error; err != nil {
 		return core.ThrowNewError(c, "failed to get posts")
 	}
 
@@ -340,4 +358,40 @@ func GetFavourites(c *fiber.Ctx, db *gorm.DB, UserID uint) error {
 		return core.ThrowNewError(c, "failed to get user")
 	}
 	return c.JSON(fiber.Map{"data": user.Liked})
+}
+
+func GetPendingPostsForAdmin(c *fiber.Ctx, db *gorm.DB) error {
+	adminID := c.Locals("userID").(uint)
+	var admin user.User
+	if err := db.First(&admin, adminID).Error; err != nil || admin.Status != "admin" {
+		return c.Status(403).JSON(fiber.Map{"msg": "admin access required"})
+	}
+
+	var posts []user.Post
+	if err := db.Where("is_approved = ?", false).Preload("User").Order("created_at DESC").Find(&posts).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"msg": "failed to fetch pending posts"})
+	}
+
+	return c.JSON(fiber.Map{"data": posts})
+}
+
+func ApprovePostByAdmin(c *fiber.Ctx, db *gorm.DB) error {
+	adminID := c.Locals("userID").(uint)
+	var admin user.User
+	if err := db.First(&admin, adminID).Error; err != nil || admin.Status != "admin" {
+		return c.Status(403).JSON(fiber.Map{"msg": "admin access required"})
+	}
+
+	type Req struct {
+		PostID uint `json:"post_id"`
+	}
+	var req Req
+	if err := c.BodyParser(&req); err != nil || req.PostID == 0 {
+		return c.Status(400).JSON(fiber.Map{"msg": "invalid post id"})
+	}
+
+	if err := db.Model(&user.Post{}).Where("id = ?", req.PostID).Update("is_approved", true).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"msg": "failed to approve post"})
+	}
+	return c.JSON(fiber.Map{"msg": "post approved"})
 }

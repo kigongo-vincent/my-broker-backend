@@ -3,49 +3,59 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Broker backend</title>
+    <title>My Broker Admin</title>
+    <style>
+      body { font-family: sans-serif; margin: 24px; background: #121212; color: #fff; }
+      button { margin: 4px 0; padding: 8px 10px; }
+      input { padding: 8px; margin: 4px 0; width: 320px; }
+      pre { background: #1d1d1d; padding: 12px; border-radius: 8px; overflow: auto; }
+    </style>
   </head>
   <body>
-    <input type="text" />
-    <hr />
-    <input type="text" id="method" />
-    <hr />
-    <button>submit</button> <br />
+    <h2>Admin Panel</h2>
+    <p>Manage users, ID approvals, and post moderation.</p>
+    <input id="token" type="text" placeholder="Admin JWT token" />
     <br />
-    <textarea rows="10" cols="30" name="" id=""></textarea>
+    <button id="load-users">Load users</button>
+    <button id="load-pending-posts">Load pending posts</button>
+    <br />
+    <input id="approve-user-id" type="number" placeholder="User ID to approve identity" />
+    <button id="approve-user">Approve ID</button>
+    <br />
+    <input id="approve-post-id" type="number" placeholder="Post ID to approve" />
+    <button id="approve-post">Approve post</button>
+    <pre id="output"></pre>
 
     <script>
-      const inputEl = document.querySelector("input");
-      const buttonEl = document.querySelector("button");
-      const methodEl = document.getElementById("method");
-      const responseEl = document.querySelector("textarea");
       const baseUrl = "http://localhost:3000";
+      const outputEl = document.getElementById("output");
+      const tokenEl = document.getElementById("token");
 
-      buttonEl.addEventListener("click", (e) => {
-        e.preventDefault();
-        makeQuery();
+      const headers = () => ({
+        "Content-type": "application/json",
+        Authorization: `Bearer ${tokenEl.value}`,
       });
 
-      async function makeQuery() {
-        try {
-          let method = methodEl?.value;
-          const controls = {};
-          method == "post"
-            ? (controls["method"] = "POST")
-            : controls["method"] == "GET";
-
-          if (method == "post") {
-            controls["headers"] = { "Content-type": "application/json" };
-            controls["body"] = responseEl?.value;
-          }
-          const res = await fetch(baseUrl + "/" + inputEl.value, controls);
-          const data = await res.json();
-          // responseEl.value = data;
-        } catch (e) {
-          // responseEl.value = e;
-          console.log(e);
-        }
+      async function request(path, method = "GET", body) {
+        const res = await fetch(`${baseUrl}${path}`, {
+          method,
+          headers: headers(),
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        const data = await res.json();
+        outputEl.textContent = JSON.stringify(data, null, 2);
       }
+
+      document.getElementById("load-users").onclick = () => request("/auth/admin/users");
+      document.getElementById("load-pending-posts").onclick = () => request("/posts/admin/pending");
+      document.getElementById("approve-user").onclick = () =>
+        request("/auth/admin/approve-id", "POST", {
+          user_id: Number(document.getElementById("approve-user-id").value),
+        });
+      document.getElementById("approve-post").onclick = () =>
+        request("/posts/admin/approve", "POST", {
+          post_id: Number(document.getElementById("approve-post-id").value),
+        });
     </script>
   </body>
 </html>

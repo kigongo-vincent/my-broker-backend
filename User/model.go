@@ -18,14 +18,14 @@ type Location struct {
 
 type Post struct {
 	gorm.Model
-	UserID                  uint           `json:"user_id"`
+	UserID                  uint           `json:"user_id" gorm:"not null;index"`
 	User                    User           `json:"user" gorm:"foreignKey:UserID"`
 	Price                   Price          `json:"price" gorm:"embedded;embeddedPrefix:price_"`
 	Location                Location       `json:"location" gorm:"embedded;embeddedPrefix:location_"`
 	Likers                  []User         `json:"likers" gorm:"many2many:post_likes"`
-	Bedrooms                string         `json:"bedrooms"`
-	Bathrooms               string         `json:"bathrooms"`
-	Toilets                 string         `json:"toilets"`
+	Bedrooms                string         `json:"bedrooms" gorm:"not null;default:''"`
+	Bathrooms               string         `json:"bathrooms" gorm:"not null;default:''"`
+	Toilets                 string         `json:"toilets" gorm:"not null;default:''"`
 	Images                  datatypes.JSON `json:"images" gorm:"type:json"`
 	Ammenities              datatypes.JSON `json:"ammenities" gorm:"type:json"`
 	PayWaterBills           bool           `json:"pay_water_bills"`
@@ -33,24 +33,28 @@ type Post struct {
 	PayForTrash             bool           `json:"pay_for_trash"`
 	HasParking              bool           `json:"has_parking"`
 	RequiredFirstMonthsPaid int            `json:"required_first_months_paid"`
-	Units                   string         `json:"units"`
+	Units                   string         `json:"units" gorm:"not null;default:'1'"`
 	IsNegotiable            bool           `json:"is_negotiable"`
 	IsApproved              bool           `json:"is_approved" gorm:"default:false"`
-	Type                    string         `json:"type"`
+	ReviewDisclaimerAgreed  bool           `json:"review_disclaimer_agreed" gorm:"not null;default:false"`
+	Type                    string         `json:"type" gorm:"not null;default:''"`
 }
 
 type User struct {
 	gorm.Model
-	Name        string `json:"name"`
-	PhoneNumber string `json:"phone_number" gorm:"unique" validate:"required"`
+	Name        string `json:"name" gorm:"not null;default:''"`
+	PhoneNumber string `json:"phone_number" gorm:"not null;uniqueIndex" validate:"required"`
 	OTP         int    `json:"otp"`
-	Photo       string `json:"photo"`
+	Photo       string `json:"photo" gorm:"not null;default:''"`
 	Email       string `json:"email" gorm:"omit-empty"`
-	LastSeen    string `json:"last_seen"`
+	LastSeen    string `json:"last_seen" gorm:"not null;default:''"`
 	Status      string `json:"status" gorm:"default:'user'"`
 	Verified    string `json:"verified" gorm:"default:false"`
+	IsBroker    bool   `json:"is_broker" gorm:"default:false"`
+	BrokerFees  string `json:"broker_fees" gorm:"default:''"`
+	AcceptedPS  bool   `json:"accepted_ps" gorm:"default:false"`
 	Rooms       []Room `json:"rooms" gorm:"many2many:user_rooms"`
-	ShowContact bool   `json:"show_contact"`
+	ShowContact bool   `json:"show_contact" gorm:"default:true"`
 	Liked       []Post `json:"liked" gorm:"many2many:post_likes"`
 }
 
@@ -75,6 +79,19 @@ type Message struct {
 type Room struct {
 	gorm.Model
 	Users []User `json:"users" gorm:"many2many:user_rooms"`
+}
+
+type BlockedUser struct {
+	gorm.Model
+	UserID       uint `json:"user_id" gorm:"not null;index:idx_user_blocked,unique"`
+	BlockedUserID uint `json:"blocked_user_id" gorm:"not null;index:idx_user_blocked,unique"`
+}
+
+type UserReport struct {
+	gorm.Model
+	ReporterID uint   `json:"reporter_id" gorm:"not null;index"`
+	ReportedID uint   `json:"reported_id" gorm:"not null;index"`
+	Reason     string `json:"reason" gorm:"not null;default:''"`
 }
 
 type Chat struct {

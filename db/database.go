@@ -20,9 +20,13 @@ func ConnectToDB() *gorm.DB {
 	if DBERROR != nil {
 		log.Fatal("failed to connect to database " + DBERROR.Error())
 	}
-	fmt.Println("Connected to DB successully!")
 
-	DB.AutoMigrate(&user.User{}, &user.Post{}, &user.Room{}, &user.Message{})
+	DB.AutoMigrate(&user.User{}, &user.Post{}, &user.Room{}, &user.Message{}, &user.BlockedUser{}, &user.UserReport{})
+	if os.Getenv("DB_SEED") == "true" {
+		if err := SeedDatabase(DB); err != nil {
+			log.Printf("database seed failed: %v", err)
+		}
+	}
 
 	return DB
 }

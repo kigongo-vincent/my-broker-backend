@@ -1,36 +1,28 @@
 package middleware
 
 import (
-	"log"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/kigongo-vincent/my-broker-backend/core"
 )
 
-// JWTValidator is an interface to allow dependency injection
-type JWTValidator interface {
-	ValidateToken(token string) (userID uint, err error)
-}
-
-// AuthMiddleware returns a Fiber middleware function
-func AuthMiddleware(jwt JWTValidator) fiber.Handler {
+func AuthMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		token := c.Get("Authorization") // expecting "Bearer <token>"
+		token := c.Get("Authorization")
 		if token == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Missing token"})
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"msg": "missing authorization token"})
 		}
 
-		// strip "Bearer " prefix
-		if len(token) > 7 && token[:7] == "Bearer " {
-			token = token[7:]
+		if strings.HasPrefix(token, "Bearer ") {
+			token = strings.TrimPrefix(token, "Bearer ")
 		}
 
-		userID, err := jwt.ValidateToken(token)
+		userID, err := core.ParseJWT(token)
 		if err != nil {
-			log.Println("JWT validation failed:", err)
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid token"})
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"msg": "invalid token"})
 		}
 
-		// store userID in context
 		c.Locals("userID", userID)
 		return c.Next()
 	}
