@@ -1,13 +1,39 @@
+# Build stage
 FROM golang:1.24-alpine AS builder
-WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o server .
 
-FROM alpine:3.20
 WORKDIR /app
-COPY --from=builder /app/server /app/server
-COPY --from=builder /app/web /app/web
-EXPOSE 3000
-CMD ["/app/server"]
+
+# Install git and ca-certificates for dependencies
+RUN apk add --no-cache git ca-certificates
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
+
+# Final stage
+FROM alpine:latest
+
+WORKDIR /app
+
+# Install ca-certificates for HTTPS
+RUN apk --no-cache add ca-certificates tzdata
+
+# Create uploads directory
+RUN mkdir -p /app/uploads
+
+# Copy binary from builder
+COPY --from=builder /app/main .
+
+# Expose port
+EXPOSE 4545
+
+# Run the application
+CMD ["./main"]

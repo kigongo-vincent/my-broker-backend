@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"log"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -28,12 +26,9 @@ func main() {
 		AllowHeaders: "Origin,Content-Type,Accept,Authorization",
 	}))
 
-	// load env
-	err := godotenv.Load()
-	if err != nil {
-		fmt.Println("Failed to load environment variables", err)
-		log.Fatal("Failed to load environment variables")
-	}
+	// Optional .env for local dev. Docker/K8s inject env via --env-file / orchestration
+	// without copying a file into the image, so Load() often returns "file not found".
+	_ = godotenv.Load()
 	DB := db.ConnectToDB()
 
 	app.Get("/health", func(c *fiber.Ctx) error {
