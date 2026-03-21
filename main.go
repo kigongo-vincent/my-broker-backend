@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"strings"
 
@@ -30,6 +31,7 @@ func main() {
 	// load env
 	err := godotenv.Load()
 	if err != nil {
+		fmt.Println("Failed to load environment variables", err)
 		log.Fatal("Failed to load environment variables")
 	}
 	DB := db.ConnectToDB()
