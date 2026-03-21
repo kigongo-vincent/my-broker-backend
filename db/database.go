@@ -22,6 +22,9 @@ func ConnectToDB() *gorm.DB {
 	}
 
 	DB.AutoMigrate(&user.User{}, &user.Post{}, &user.Room{}, &user.Message{}, &user.BlockedUser{}, &user.UserReport{})
+	if err := DB.Exec(`CREATE INDEX IF NOT EXISTS idx_posts_approved_created_at ON posts (is_approved, created_at DESC)`).Error; err != nil {
+		log.Printf("posts index: %v", err)
+	}
 	if os.Getenv("DB_SEED") == "true" {
 		if err := SeedDatabase(DB); err != nil {
 			log.Printf("database seed failed: %v", err)

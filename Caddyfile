@@ -1,0 +1,19 @@
+# HTTP/1.1, HTTP/2, and HTTP/3 (QUIC) on :443. Upstream is the Fiber app (plain HTTP).
+# UDP 443 must be published for QUIC (see docker-compose).
+{
+	servers {
+		protocols h1 h2 h3
+	}
+}
+
+:443 {
+	tls internal
+
+	encode zstd gzip
+
+	reverse_proxy {$CADDY_UPSTREAM:api:3000} {
+		header_up Host {host}
+		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-For {remote_host}
+	}
+}

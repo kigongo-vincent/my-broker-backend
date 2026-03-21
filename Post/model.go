@@ -1,6 +1,6 @@
 package post
 
-import user "github.com/kigongo-vincent/my-broker-backend/User"
+import usr "github.com/kigongo-vincent/my-broker-backend/User"
 
 type PostLocationI struct {
 	Id        uint    `json:"id"`
@@ -18,8 +18,8 @@ type NestedPost struct {
 	Type         string        `json:"type"`
 	Author       *NestedUser   `json:"author,omitempty"`
 	User         *NestedUser   `json:"user,omitempty"`
-	Price        user.Price    `json:"price"`
-	Location     user.Location `json:"location"`
+	Price        usr.Price    `json:"price"`
+	Location     usr.Location `json:"location"`
 	IsLiked      bool          `json:"is_liked"`
 	IsNegotiable bool          `json:"is_negotiable"`
 	Bedrooms     string        `json:"bedrooms"`
@@ -31,7 +31,7 @@ type NestedPost struct {
 	Selected     *bool         `json:"selected,omitempty"`
 }
 
-// NestedUser is a simplified version of user.User
+// NestedUser is a simplified view of domain user fields.
 type NestedUser struct {
 	ID          uint   `json:"ID"`
 	Name        string `json:"name"`

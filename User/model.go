@@ -83,7 +83,7 @@ type Room struct {
 
 type BlockedUser struct {
 	gorm.Model
-	UserID       uint `json:"user_id" gorm:"not null;index:idx_user_blocked,unique"`
+	UserID        uint `json:"user_id" gorm:"not null;index:idx_user_blocked,unique"`
 	BlockedUserID uint `json:"blocked_user_id" gorm:"not null;index:idx_user_blocked,unique"`
 }
 

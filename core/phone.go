@@ -60,4 +60,3 @@ func UGPhoneCandidates(normalized string) []string {
 	local := "0" + normalized[4:]
 	return []string{normalized, noPlus, local}
 }
-

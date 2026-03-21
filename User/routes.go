@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/kigongo-vincent/my-broker-backend/fbcodec"
 	"github.com/kigongo-vincent/my-broker-backend/middleware"
 	"gorm.io/gorm"
 )
@@ -34,7 +35,7 @@ func RegisterRoutes(app *fiber.App, DB *gorm.DB) {
 		userID := c.Locals("userID").(uint)
 		participantID, err := strconv.ParseUint(c.Query("participant_id"), 10, 32)
 		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"msg": "failed to get participant id"})
+			return fbcodec.SendError(c, 400, "failed to get participant id")
 		}
 		return GetOrCreateRoomByParticipants(c, DB, userID, uint(participantID))
 	})

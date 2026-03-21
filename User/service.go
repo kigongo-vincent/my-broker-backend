@@ -10,149 +10,175 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	flatbuffers "github.com/google/flatbuffers/go"
 	"github.com/kigongo-vincent/my-broker-backend/core"
+	"github.com/kigongo-vincent/my-broker-backend/fbcodec"
+	"github.com/kigongo-vincent/my-broker-backend/fbs/gen/mybroker"
 	"gorm.io/gorm"
 )
 
-func RequestOTP(c *fiber.Ctx, db *gorm.DB) error {
-
-	user := new(User)
-	user.OTP = rand.Intn(9000) + 1000
-	if err := c.BodyParser(user); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+// roomChatAggregates loads last message per room and unread counts for viewerUserID.
+// Unread = messages the other person sent that viewer has not read yet (never count viewer's own messages).
+func roomChatAggregates(db *gorm.DB, roomIDs []uint, viewerUserID uint) (lastByRoom map[uint]Message, unreadByRoom map[uint]int64, err error) {
+	lastByRoom = make(map[uint]Message)
+	unreadByRoom = make(map[uint]int64)
+	if len(roomIDs) == 0 {
+		return lastByRoom, unreadByRoom, nil
 	}
-	normalizedPhone, err := core.NormalizeUGPhoneNumber(user.PhoneNumber)
+	var lasts []Message
+	err = db.Raw(`
+		SELECT DISTINCT ON (room_id) messages.*
+		FROM messages
+		WHERE room_id IN ?
+		ORDER BY room_id, id DESC
+	`, roomIDs).Scan(&lasts).Error
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"msg": err.Error()})
+		return nil, nil, err
 	}
-	user.PhoneNumber = normalizedPhone
+	for i := range lasts {
+		lastByRoom[lasts[i].RoomID] = lasts[i]
+	}
+	type cntRow struct {
+		RoomID uint
+		Cnt    int64
+	}
+	var counts []cntRow
+	err = db.Model(&Message{}).
+		Select("room_id, COUNT(*) as cnt").
+		Where("room_id IN ? AND is_read = ? AND user_id <> ?", roomIDs, false, viewerUserID).
+		Group("room_id").
+		Scan(&counts).Error
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, r := range counts {
+		unreadByRoom[r.RoomID] = r.Cnt
+	}
+	return lastByRoom, unreadByRoom, nil
+}
 
+func RequestOTP(c *fiber.Ctx, db *gorm.DB) error {
+	req, err := fbcodec.OpenRequest(c.Body())
+	if err != nil {
+		return fbcodec.SendError(c, 400, err.Error())
+	}
+	phoneRaw, err := ParseSignInPhone(req)
+	if err != nil {
+		return fbcodec.SendError(c, 400, err.Error())
+	}
+	otpVal := rand.Intn(9000) + 1000
+	normalizedPhone, err := core.NormalizeUGPhoneNumber(phoneRaw)
+	if err != nil {
+		return fbcodec.SendError(c, 400, err.Error())
+	}
+	newUser := User{PhoneNumber: normalizedPhone, OTP: otpVal}
 	var existing User
-	lookup := db.Where("phone_number IN ?", core.UGPhoneCandidates(user.PhoneNumber)).Limit(1).Find(&existing)
+	lookup := db.Where("phone_number IN ?", core.UGPhoneCandidates(normalizedPhone)).Limit(1).Find(&existing)
 	if lookup.Error != nil {
-		return c.Status(500).JSON(fiber.Map{"error": lookup.Error.Error()})
+		return fbcodec.SendError(c, 500, lookup.Error.Error())
 	}
-
 	if lookup.RowsAffected == 0 {
-		// New user -> create, then send OTP
-		if err := db.Create(user).Error; err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		if err := db.Create(&newUser).Error; err != nil {
+			return fbcodec.SendError(c, 400, err.Error())
 		}
-		if err := core.SendOTP(user.PhoneNumber, user.OTP); err != nil {
-			return c.Status(201).JSON(fiber.Map{
-				"msg":     "OTP generated for " + user.PhoneNumber,
-				"warning": "sms delivery failed",
-				"otp":     user.OTP,
-			})
+		if err := core.SendOTP(newUser.PhoneNumber, newUser.OTP); err != nil {
+			return fbcodec.SendOTP(c, 201, "OTP generated for "+newUser.PhoneNumber, "sms delivery failed", int32(newUser.OTP))
 		}
 		if os.Getenv("SMS_DRY_RUN") == "true" {
-			return c.Status(201).JSON(fiber.Map{"msg": "OTP has been send to " + user.PhoneNumber, "otp": user.OTP})
+			return fbcodec.SendOTP(c, 201, "OTP has been send to "+newUser.PhoneNumber, "", int32(newUser.OTP))
 		}
-		return c.Status(201).JSON(fiber.Map{"msg": "OTP has been send to " + user.PhoneNumber})
+		return fbcodec.SendOTP(c, 201, "OTP has been send to "+newUser.PhoneNumber, "", 0)
 	}
-
-	// Existing user -> only regenerate OTP
-	if existing.PhoneNumber != user.PhoneNumber {
-		if err := db.Model(&existing).Update("phone_number", user.PhoneNumber).Error; err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	if existing.PhoneNumber != normalizedPhone {
+		if err := db.Model(&existing).Update("phone_number", normalizedPhone).Error; err != nil {
+			return fbcodec.SendError(c, 400, err.Error())
 		}
 	}
-	existing.OTP = user.OTP
+	existing.OTP = otpVal
 	if err := db.Model(&existing).Update("otp", existing.OTP).Error; err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		return fbcodec.SendError(c, 400, err.Error())
 	}
-	if err := core.SendOTP(user.PhoneNumber, existing.OTP); err != nil {
-		return c.Status(202).JSON(fiber.Map{
-			"msg":     "OTP generated for " + user.PhoneNumber,
-			"warning": "sms delivery failed",
-			"otp":     existing.OTP,
-		})
+	if err := core.SendOTP(normalizedPhone, existing.OTP); err != nil {
+		return fbcodec.SendOTP(c, 202, "OTP generated for "+normalizedPhone, "sms delivery failed", int32(existing.OTP))
 	}
 	if os.Getenv("SMS_DRY_RUN") == "true" {
-		return c.Status(202).JSON(fiber.Map{"msg": "OTP has been send to " + user.PhoneNumber, "otp": existing.OTP})
+		return fbcodec.SendOTP(c, 202, "OTP has been send to "+normalizedPhone, "", int32(existing.OTP))
 	}
-	return c.Status(202).JSON(fiber.Map{"msg": "OTP has been send to " + user.PhoneNumber})
+	return fbcodec.SendOTP(c, 202, "OTP has been send to "+normalizedPhone, "", 0)
 }
 
 func VerifyOTP(c *fiber.Ctx, db *gorm.DB) error {
-
-	// get user otp
-	var tmpUser User
+	req, err := fbcodec.OpenRequest(c.Body())
+	if err != nil {
+		return fbcodec.SendError(c, 400, "failed to retrieve OTP"+err.Error())
+	}
+	v, err := ParseVerifyOtp(req)
+	if err != nil {
+		return fbcodec.SendError(c, 400, err.Error())
+	}
+	otp := int(v.Otp())
+	if otp == 0 {
+		return fbcodec.SendError(c, 400, "Invalid OTP format")
+	}
 	var foundUser User
-	if err := c.BodyParser(&tmpUser); err != nil {
-		return c.Status(400).JSON(fiber.Map{"msg": "failed to retrieve OTP" + err.Error()})
-	}
-
-	// check for otp
-	if tmpUser.OTP == 0 {
-		return c.Status(400).JSON(fiber.Map{"msg": "Invalid OTP format"})
-	}
-
-	lookup := db.Where("otp = ?", tmpUser.OTP)
-	if tmpUser.PhoneNumber != "" {
-		normalizedPhone, err := core.NormalizeUGPhoneNumber(tmpUser.PhoneNumber)
+	lookup := db.Where("otp = ?", otp)
+	if pn := string(v.PhoneNumber()); pn != "" {
+		normalizedPhone, err := core.NormalizeUGPhoneNumber(pn)
 		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"msg": err.Error()})
+			return fbcodec.SendError(c, 400, err.Error())
 		}
 		lookup = lookup.Where("phone_number IN ?", core.UGPhoneCandidates(normalizedPhone))
-	} else if tmpUser.Email != "" {
-		lookup = lookup.Where("email = ?", tmpUser.Email)
+	} else if em := string(v.Email()); em != "" {
+		lookup = lookup.Where("email = ?", em)
 	} else {
-		return c.Status(400).JSON(fiber.Map{"msg": "phone number or email is required"})
+		return fbcodec.SendError(c, 400, "phone number or email is required")
 	}
-
-	// check for the user with the provided id (phone/email) and otp
 	if err := lookup.First(&foundUser).Error; err != nil {
-		return c.Status(400).JSON(fiber.Map{"msg": "invalid credentials submitted" + err.Error()})
+		return fbcodec.SendError(c, 400, "invalid credentials submitted"+err.Error())
 	}
-
 	token, err := core.IssueJWT(foundUser.ID)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"msg": "failed to issue auth token"})
+		return fbcodec.SendError(c, 500, "failed to issue auth token")
 	}
-
-	// update the found user (only after token was issued successfully)
 	foundUser.OTP = 0
 	if err := db.Save(&foundUser).Error; err != nil {
-		return c.Status(400).JSON(fiber.Map{"msg": "Failed to clear the otp"})
+		return fbcodec.SendError(c, 400, "Failed to clear the otp")
 	}
-
-	return c.Status(200).JSON(fiber.Map{
-		"msg":   "otp verified successfully",
-		"token": token,
-		"user":  foundUser,
-	})
+	return fbcodec.SendAuthOK(c, "otp verified successfully", token, UserToIn(foundUser))
 }
 
 func GoogleSignin(c *fiber.Ctx, db *gorm.DB) error {
-	type Req struct {
-		AccessToken string `json:"access_token"`
-		IDToken     string `json:"id_token"`
+	req, err := fbcodec.OpenRequest(c.Body())
+	if err != nil {
+		return fbcodec.SendError(c, 400, "invalid google payload")
 	}
-	var req Req
-	if err := c.BodyParser(&req); err != nil || (req.AccessToken == "" && req.IDToken == "") {
-		return c.Status(400).JSON(fiber.Map{"msg": "invalid google payload"})
+	g, err := ParseGoogleAuth(req)
+	if err != nil {
+		return fbcodec.SendError(c, 400, "invalid google payload")
 	}
-
+	access := string(g.AccessToken())
+	idTok := string(g.IdToken())
+	if access == "" && idTok == "" {
+		return fbcodec.SendError(c, 400, "invalid google payload")
+	}
 	type GoogleProfile struct {
 		Email   string `json:"email"`
 		Name    string `json:"name"`
 		Picture string `json:"picture"`
 	}
 	var profile GoogleProfile
-	if req.AccessToken != "" {
+	if access != "" {
 		httpReq, _ := http.NewRequest(http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
-		httpReq.Header.Set("Authorization", "Bearer "+req.AccessToken)
+		httpReq.Header.Set("Authorization", "Bearer "+access)
 		res, err := http.DefaultClient.Do(httpReq)
 		if err != nil || res.StatusCode != http.StatusOK {
-			return c.Status(401).JSON(fiber.Map{"msg": "failed to verify google access token"})
+			return fbcodec.SendError(c, 401, "failed to verify google access token")
 		}
 		defer res.Body.Close()
 		if err = json.NewDecoder(res.Body).Decode(&profile); err != nil || profile.Email == "" {
-			return c.Status(401).JSON(fiber.Map{"msg": "invalid google profile response"})
+			return fbcodec.SendError(c, 401, "invalid google profile response")
 		}
 	}
-
 	var foundUser User
 	if err := db.Where("email = ?", profile.Email).First(&foundUser).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -164,71 +190,53 @@ func GoogleSignin(c *fiber.Ctx, db *gorm.DB) error {
 				Status:      "user",
 			}
 			if createErr := db.Create(&foundUser).Error; createErr != nil {
-				return c.Status(500).JSON(fiber.Map{"msg": "failed to create google user"})
+				return fbcodec.SendError(c, 500, "failed to create google user")
 			}
 		} else {
-			return c.Status(500).JSON(fiber.Map{"msg": "failed to lookup user"})
+			return fbcodec.SendError(c, 500, "failed to lookup user")
 		}
 	}
-
 	token, err := core.IssueJWT(foundUser.ID)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"msg": "failed to issue auth token"})
+		return fbcodec.SendError(c, 500, "failed to issue auth token")
 	}
-	return c.Status(200).JSON(fiber.Map{"msg": "google signin successful", "token": token, "user": foundUser})
+	return fbcodec.SendAuthOK(c, "google signin successful", token, UserToIn(foundUser))
 }
 
 func GetRooms(c *fiber.Ctx, db *gorm.DB, UserID uint) error {
-
-	// var rooms []Room
-	// if err := db.Preload("User").Find(&rooms).Error; err != nil {
-	// 	return c.Status(400).JSON(fiber.Map{"msg": "failed to get rooms"})
-	// }
-	var user User
-
-	type Chat struct {
-		Id          uint   `json:"id"`
-		User        User   `json:"user"`
-		LastMessage string `json:"lastMessage"`
-		NewMessages uint   `json:"newMessages"`
+	var uu User
+	if err := db.Preload("Rooms").Preload("Rooms.Users").First(&uu, UserID).Error; err != nil {
+		return fbcodec.SendError(c, 400, "failed to get rooms")
 	}
-	var chats []Chat
-	if err := db.Preload("Rooms").Preload("Rooms.Users").First(&user, UserID).Error; err != nil {
-
-		return c.Status(400).JSON(fiber.Map{"msg": "failed to get rooms"})
+	roomIDs := make([]uint, 0, len(uu.Rooms))
+	for _, r := range uu.Rooms {
+		roomIDs = append(roomIDs, r.ID)
 	}
-
-	for _, room := range user.Rooms {
-
-		var user = getParticipant(room.Users, UserID)
-
-		var LastMessage Message
-		var NewMessages int64
-		var messages []Message
-
-		if err := db.Where("room_id = ?", room.ID).Last(&LastMessage).Error; err != nil {
-			// return c.Status(400).JSON(fiber.Map{"msg": "failed to get room last messages"})
-		}
-
-		if err := db.Where("room_id = ? AND is_read = ?", room.ID, false).Find(&messages).Count(&NewMessages).Error; err != nil {
-			return c.Status(400).JSON(fiber.Map{"msg": "failed to get room messages count"})
-		}
-
+	lastBy, unreadBy, err := roomChatAggregates(db, roomIDs, UserID)
+	if err != nil {
+		return fbcodec.SendError(c, 400, "failed to get room messages count")
+	}
+	chats := make([]Chat, 0, len(uu.Rooms))
+	for _, room := range uu.Rooms {
+		peer := getParticipant(room.Users, UserID)
+		lm := lastBy[room.ID]
 		chats = append(chats, Chat{
 			Id:          room.ID,
-			User:        user,
-			LastMessage: core.Trim(LastMessage.Text, 30),
-			NewMessages: uint(NewMessages),
+			User:        peer,
+			LastMessage: core.Trim(lm.Text, 30),
+			NewMessages: uint(unreadBy[room.ID]),
 		})
 	}
-
-	return c.JSON(fiber.Map{"data": chats})
-
+	chatRows := make([]fbcodec.ChatIn, len(chats))
+	for i := range chats {
+		chatRows[i] = ChatToIn(chats[i])
+	}
+	return fbcodec.BuildAndSend(c, 200, "ok", "", "", 0, mybroker.ApiPayloadChatRowList, 65536, func(b *flatbuffers.Builder) flatbuffers.UOffsetT {
+		return fbcodec.BuildChatRowList(b, chatRows)
+	})
 }
 
 func GetOrCreateRoomByParticipants(c *fiber.Ctx, db *gorm.DB, UserID uint, ParticipantID uint) error {
-
-	// Step 1: Try to find a room with exactly these two participants
 	var room Room
 	err := db.Model(&Room{}).
 		Joins("JOIN user_rooms ur1 ON ur1.room_id = rooms.id AND ur1.user_id = ?", UserID).
@@ -241,392 +249,311 @@ func GetOrCreateRoomByParticipants(c *fiber.Ctx, db *gorm.DB, UserID uint, Parti
 		).
 		Preload("Users").
 		First(&room).Error
-
-	// Step 2: If not found, create new room and add both users
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			newRoom := Room{}
 			if err := db.Create(&newRoom).Error; err != nil {
 				return core.ThrowNewError(c, "failed to create room")
 			}
-
 			rows := []map[string]any{
 				{"room_id": newRoom.ID, "user_id": UserID},
 				{"room_id": newRoom.ID, "user_id": ParticipantID},
 			}
-
 			if err := db.Table("user_rooms").Create(rows).Error; err != nil {
 				return core.ThrowNewError(c, "failed to assign users to room")
 			}
-
 			room = newRoom
 		} else {
 			return core.ThrowNewError(c, "failed to fetch room")
 		}
 	}
-
-	// Step 3: Fetch messages
 	_ = db.Model(&Message{}).
 		Where("room_id = ? AND user_id <> ? AND is_read = ?", room.ID, UserID, false).
 		Update("is_read", true).Error
-
 	var messages []Message
-	if err := db.Where("room_id = ?", room.ID).
+	_ = db.Where("room_id = ?", room.ID).
 		Preload("Post").
 		Preload("Post.User").
 		Order("id ASC").
-		Find(&messages).Error; err != nil {
-		// return core.ThrowNewError(c, "failed to get room messages")
+		Find(&messages).Error
+	rows := make([]fbcodec.ChatMsgRow, 0, len(messages))
+	for _, m := range messages {
+		rows = append(rows, fbcodec.ChatMsgRow{
+			ID: m.ID, Text: m.Text, Image: m.Attachment, Post: PostToIn(m.Post),
+			CreatedAtUnixMs: m.CreatedAt.UnixMilli(), SeenByRecipient: m.IsRead,
+			// true = incoming for the authenticated user (peer sent this message)
+			IsOwnedByRecipient: m.UserID != UserID,
+		})
 	}
-
-	// Prepare response
-	type ChatContent struct {
-		Text  string `json:"text"`
-		Image string `json:"image"`
-		Post  Post   `json:"post"`
-	}
-
-	type ChatMessage struct {
-		Id                 uint        `json:"id"`
-		Content            ChatContent `json:"content"`
-		CreatedAt          time.Time   `json:"createdAt"`
-		SeenByRecipient    bool        `json:"seenByRecipient"`
-		IsOwnedByRecipient bool        `json:"isOwnedByRecipient"`
-	}
-
-	var chatMessages []ChatMessage
-	if len(messages) != 0 {
-		for _, m := range messages {
-			chatMessages = append(chatMessages, ChatMessage{
-				Id: m.ID,
-				Content: ChatContent{
-					Text:  m.Text,
-					Image: m.Attachment,
-					Post:  m.Post,
-				},
-				CreatedAt:          m.CreatedAt,
-				IsOwnedByRecipient: m.UserID == UserID,
-				SeenByRecipient:    m.IsRead,
-			})
-		}
-	}
-
-	chat := struct {
-		Id       uint          `json:"id"`
-		User     User          `json:"user"`
-		Messages []ChatMessage `json:"messages"`
-	}{
-		Id:       room.ID,
-		User:     getParticipant(room.Users, UserID),
-		Messages: chatMessages,
-	}
-
-	return c.JSON(fiber.Map{"data": chat})
+	peer := getParticipant(room.Users, UserID)
+	return fbcodec.BuildAndSend(c, 200, "ok", "", "", 0, mybroker.ApiPayloadChatDetail, 262144, func(b *flatbuffers.Builder) flatbuffers.UOffsetT {
+		return fbcodec.BuildChatDetail(b, room.ID, UserToIn(peer), rows)
+	})
 }
 
 func getParticipant(users []User, UserID uint) User {
-	for _, user := range users {
-		if user.ID != UserID {
-			return user
+	for _, u := range users {
+		if u.ID != UserID {
+			return u
 		}
 	}
 	return User{}
 }
 
 func UpdateProfile(c *fiber.Ctx, db *gorm.DB) error {
-
-	type UserRequest struct {
-		ID          uint    `json:"id"`
-		Username    string  `json:"username"`
-		Photo       string  `json:"photo"`
-		ShowContact *bool   `json:"show_contact"`
-		IsBroker    *bool   `json:"is_broker"`
-		BrokerFees  *string `json:"broker_fees"`
-		AcceptedPS  *bool   `json:"accepted_ps"`
-	}
-
-	var body UserRequest
-	if err := c.BodyParser(&body); err != nil {
+	req, err := fbcodec.OpenRequest(c.Body())
+	if err != nil {
 		return core.ThrowNewError(c, "failed to parse user data")
 	}
-
-	var user User
-	authUserID, ok := c.Locals("userID").(uint)
-	if !ok || authUserID == 0 || authUserID != body.ID {
-		return c.Status(403).JSON(fiber.Map{"msg": "forbidden"})
+	body, err := ParseUpdateProfile(req)
+	if err != nil {
+		return core.ThrowNewError(c, "failed to parse user data")
 	}
-	if err := db.First(&user, body.ID).Error; err != nil {
+	authUserID, ok := c.Locals("userID").(uint)
+	if !ok || authUserID == 0 || authUserID != uint(body.Id()) {
+		return fbcodec.SendError(c, 403, "forbidden")
+	}
+	var uu User
+	if err := db.First(&uu, body.Id()).Error; err != nil {
 		return core.ThrowNewError(c, "user not found")
 	}
-
-	if body.Username != "" {
-		if err := db.Model(&user).Update("name", body.Username).Error; err != nil {
+	if un := string(body.Username()); un != "" {
+		if err := db.Model(&uu).Update("name", un).Error; err != nil {
 			return core.ThrowNewError(c, "failed to update username")
 		}
 	}
-
-	if body.Photo != "" {
-		if err := db.Model(&user).Update("photo", body.Photo).Error; err != nil {
+	if ph := string(body.Photo()); ph != "" {
+		if err := db.Model(&uu).Update("photo", ph).Error; err != nil {
 			return core.ThrowNewError(c, "failed to update photo")
 		}
 	}
-	if body.ShowContact != nil {
-		if err := db.Model(&user).Update("show_contact", *body.ShowContact).Error; err != nil {
+	if body.ShowContactSet() {
+		if err := db.Model(&uu).Update("show_contact", body.ShowContact()).Error; err != nil {
 			return core.ThrowNewError(c, "failed to update contact visibility")
 		}
 	}
-	if body.IsBroker != nil {
-		if err := db.Model(&user).Update("is_broker", *body.IsBroker).Error; err != nil {
+	if body.IsBrokerSet() {
+		if err := db.Model(&uu).Update("is_broker", body.IsBroker()).Error; err != nil {
 			return core.ThrowNewError(c, "failed to update broker status")
 		}
 	}
-	if body.BrokerFees != nil {
-		if err := db.Model(&user).Update("broker_fees", *body.BrokerFees).Error; err != nil {
+	if body.BrokerFeesSet() {
+		if err := db.Model(&uu).Update("broker_fees", string(body.BrokerFees())).Error; err != nil {
 			return core.ThrowNewError(c, "failed to update broker fees")
 		}
 	}
-	if body.AcceptedPS != nil {
-		if err := db.Model(&user).Update("accepted_ps", *body.AcceptedPS).Error; err != nil {
+	if body.AcceptedPsSet() {
+		if err := db.Model(&uu).Update("accepted_ps", body.AcceptedPs()).Error; err != nil {
 			return core.ThrowNewError(c, "failed to update terms acceptance")
 		}
 	}
-
-	return c.SendStatus(202)
-
+	return fbcodec.SendEmpty(c, 202, "")
 }
 
 func GetChatsAndFavourites(c *fiber.Ctx, db *gorm.DB, UserID uint) error {
-	var favourites int
-	var user User
-
-	var chats []Chat
-	if err := db.Preload("Rooms").Preload("Rooms.Users").Preload("Liked").Preload("Liked.Likers").First(&user, UserID).Error; err != nil {
-
-		return c.Status(400).JSON(fiber.Map{"msg": "failed to get rooms"})
+	var uu User
+	if err := db.Preload("Rooms").Preload("Rooms.Users").Preload("Liked").Preload("Liked.Likers").First(&uu, UserID).Error; err != nil {
+		return fbcodec.SendError(c, 400, "failed to get rooms")
 	}
-
-	for _, room := range user.Rooms {
-
-		var user = getParticipant(room.Users, UserID)
-
-		var LastMessage Message
-		var NewMessages int64
-		var messages []Message
-
-		if err := db.Where("room_id = ?", room.ID).Last(&LastMessage).Error; err != nil {
-			// return c.Status(400).JSON(fiber.Map{"msg": "failed to get room last messages"})
-		}
-
-		if err := db.Where("room_id = ? AND is_read = ?", room.ID, false).Find(&messages).Count(&NewMessages).Error; err != nil {
-			return c.Status(400).JSON(fiber.Map{"msg": "failed to get room messages count"})
-		}
-
+	roomIDs := make([]uint, 0, len(uu.Rooms))
+	for _, r := range uu.Rooms {
+		roomIDs = append(roomIDs, r.ID)
+	}
+	lastBy, unreadBy, err := roomChatAggregates(db, roomIDs, UserID)
+	if err != nil {
+		return fbcodec.SendError(c, 400, "failed to get room messages count")
+	}
+	chats := make([]Chat, 0, len(uu.Rooms))
+	for _, room := range uu.Rooms {
+		peer := getParticipant(room.Users, UserID)
+		lm := lastBy[room.ID]
 		chats = append(chats, Chat{
 			Id:          room.ID,
-			User:        user,
-			LastMessage: core.Trim(LastMessage.Text, 30),
-			NewMessages: uint(NewMessages),
+			User:        peer,
+			LastMessage: core.Trim(lm.Text, 30),
+			NewMessages: uint(unreadBy[room.ID]),
 		})
 	}
-
-	favourites = len(user.Liked)
-	data := map[string]any{
-		"chats":      getUnreadMessagesCountForRooms(chats),
-		"favourites": favourites,
+	unreadTotal := int32(0)
+	for _, ch := range chats {
+		unreadTotal += int32(ch.NewMessages)
 	}
-
-	return c.JSON(fiber.Map{"data": data})
-
-}
-
-func getUnreadMessagesCountForRooms(chats []Chat) int {
-	var count int
-	for _, chat := range chats {
-		count += int(chat.NewMessages)
-	}
-	return count
+	return fbcodec.BuildAndSend(c, 200, "ok", "", "", 0, mybroker.ApiPayloadChatsAndFavs, 4096, func(b *flatbuffers.Builder) flatbuffers.UOffsetT {
+		return fbcodec.BuildChatsAndFavs(b, int(unreadTotal), len(uu.Liked))
+	})
 }
 
 func UpdateID(c *fiber.Ctx, db *gorm.DB) error {
-
-	type Req struct {
-		ID    uint   `json:"id"`
-		Type  string `json:"type"` // phone or email
-		Value string `json:"value"`
-	}
-
-	var req Req
-	if err := c.BodyParser(&req); err != nil {
+	req, err := fbcodec.OpenRequest(c.Body())
+	if err != nil {
 		return core.ThrowNewError(c, "failed to parse body")
 	}
-
-	var user User
-	var column string
-	if req.Type == "phone" {
-		column = "phone_number"
-		normalizedPhone, err := core.NormalizeUGPhoneNumber(req.Value)
-		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"msg": err.Error()})
-		}
-		req.Value = normalizedPhone
-	} else if req.Type == "email" {
-		column = "email"
+	body, err := ParseUpdateID(req)
+	if err != nil {
+		return core.ThrowNewError(c, "failed to parse body")
 	}
-
 	authUserID, ok := c.Locals("userID").(uint)
-	if !ok || authUserID == 0 || authUserID != req.ID {
-		return c.Status(403).JSON(fiber.Map{"msg": "forbidden"})
+	if !ok || authUserID == 0 || authUserID != uint(body.Id()) {
+		return fbcodec.SendError(c, 403, "forbidden")
 	}
-
-	if err := db.First(&user, req.ID).Error; err != nil {
+	var uu User
+	if err := db.First(&uu, body.Id()).Error; err != nil {
 		return core.ThrowNewError(c, "failed to get user")
 	}
-
-	if err := db.Model(&user).Update("otp", rand.Intn(9000)+1000).Update(column, req.Value).Error; err != nil {
+	val := string(body.Value())
+	column := ""
+	switch string(body.Type()) {
+	case "phone":
+		column = "phone_number"
+		normalizedPhone, err := core.NormalizeUGPhoneNumber(val)
+		if err != nil {
+			return fbcodec.SendError(c, 400, err.Error())
+		}
+		val = normalizedPhone
+	case "email":
+		column = "email"
+	default:
+		return core.ThrowNewError(c, "failed to parse body")
+	}
+	if err := db.Model(&uu).Update("otp", rand.Intn(9000)+1000).Update(column, val).Error; err != nil {
 		return core.ThrowNewError(c, "failed to generate OTP")
 	}
-
-	return c.JSON(fiber.Map{"msg": "otp generated successfully"})
-
+	return fbcodec.SendEmpty(c, 200, "otp generated successfully")
 }
 
 func UpdateLastSeen(c *fiber.Ctx, db *gorm.DB) error {
 	userID, ok := c.Locals("userID").(uint)
 	if !ok || userID == 0 {
-		return c.Status(401).JSON(fiber.Map{"msg": "unauthorized"})
+		return fbcodec.SendError(c, 401, "unauthorized")
 	}
 	if err := db.Model(&User{}).Where("id = ?", userID).Update("last_seen", time.Now().UTC().Format(time.RFC3339)).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"msg": "failed to update last seen"})
+		return fbcodec.SendError(c, 500, "failed to update last seen")
 	}
-	return c.SendStatus(202)
+	return fbcodec.SendEmpty(c, 202, "")
 }
 
 func GetProfileByID(c *fiber.Ctx, db *gorm.DB) error {
 	userID := c.Query("user_id")
 	if userID == "" {
-		return c.Status(400).JSON(fiber.Map{"msg": "user_id is required"})
+		return fbcodec.SendError(c, 400, "user_id is required")
 	}
-
 	var profile User
 	if err := db.First(&profile, userID).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"msg": "user not found"})
+		return fbcodec.SendError(c, 404, "user not found")
 	}
-
-	return c.JSON(fiber.Map{"data": profile})
+	return fbcodec.BuildAndSend(c, 200, "ok", "", "", 0, mybroker.ApiPayloadAuthOk, 8192, func(b *flatbuffers.Builder) flatbuffers.UOffsetT {
+		return fbcodec.BuildAuthOk(b, UserToIn(profile))
+	})
 }
 
 func BlockUser(c *fiber.Ctx, db *gorm.DB) error {
 	authUserID, ok := c.Locals("userID").(uint)
 	if !ok || authUserID == 0 {
-		return c.Status(401).JSON(fiber.Map{"msg": "unauthorized"})
+		return fbcodec.SendError(c, 401, "unauthorized")
 	}
-
-	type Req struct {
-		BlockedUserID uint `json:"blocked_user_id"`
-		Blocked       bool `json:"blocked"`
+	req, err := fbcodec.OpenRequest(c.Body())
+	if err != nil {
+		return fbcodec.SendError(c, 400, "invalid block payload")
 	}
-	var req Req
-	if err := c.BodyParser(&req); err != nil || req.BlockedUserID == 0 || req.BlockedUserID == authUserID {
-		return c.Status(400).JSON(fiber.Map{"msg": "invalid block payload"})
+	body, err := ParseBlock(req)
+	if err != nil || body.BlockedUserId() == 0 || uint(body.BlockedUserId()) == authUserID {
+		return fbcodec.SendError(c, 400, "invalid block payload")
 	}
-
-	if req.Blocked {
-		record := BlockedUser{UserID: authUserID, BlockedUserID: req.BlockedUserID}
-		if err := db.Where("user_id = ? AND blocked_user_id = ?", authUserID, req.BlockedUserID).FirstOrCreate(&record).Error; err != nil {
-			return c.Status(500).JSON(fiber.Map{"msg": "failed to block user"})
+	if body.Blocked() {
+		record := BlockedUser{UserID: authUserID, BlockedUserID: uint(body.BlockedUserId())}
+		if err := db.Where("user_id = ? AND blocked_user_id = ?", authUserID, body.BlockedUserId()).FirstOrCreate(&record).Error; err != nil {
+			return fbcodec.SendError(c, 500, "failed to block user")
 		}
-		return c.JSON(fiber.Map{"msg": "user blocked"})
+		return fbcodec.SendEmpty(c, 200, "user blocked")
 	}
-
-	if err := db.Where("user_id = ? AND blocked_user_id = ?", authUserID, req.BlockedUserID).Delete(&BlockedUser{}).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"msg": "failed to unblock user"})
+	if err := db.Where("user_id = ? AND blocked_user_id = ?", authUserID, body.BlockedUserId()).Delete(&BlockedUser{}).Error; err != nil {
+		return fbcodec.SendError(c, 500, "failed to unblock user")
 	}
-	return c.JSON(fiber.Map{"msg": "user unblocked"})
+	return fbcodec.SendEmpty(c, 200, "user unblocked")
 }
 
 func ReportUser(c *fiber.Ctx, db *gorm.DB) error {
 	authUserID, ok := c.Locals("userID").(uint)
 	if !ok || authUserID == 0 {
-		return c.Status(401).JSON(fiber.Map{"msg": "unauthorized"})
+		return fbcodec.SendError(c, 401, "unauthorized")
 	}
-	type Req struct {
-		ReportedID uint   `json:"reported_id"`
-		Reason     string `json:"reason"`
+	req, err := fbcodec.OpenRequest(c.Body())
+	if err != nil {
+		return fbcodec.SendError(c, 400, "invalid report payload")
 	}
-	var req Req
-	if err := c.BodyParser(&req); err != nil || req.ReportedID == 0 || req.ReportedID == authUserID {
-		return c.Status(400).JSON(fiber.Map{"msg": "invalid report payload"})
+	body, err := ParseReport(req)
+	if err != nil || body.ReportedId() == 0 || uint(body.ReportedId()) == authUserID {
+		return fbcodec.SendError(c, 400, "invalid report payload")
 	}
-	report := UserReport{
-		ReporterID: authUserID,
-		ReportedID: req.ReportedID,
-		Reason:     strings.TrimSpace(req.Reason),
+	reason := strings.TrimSpace(string(body.Reason()))
+	if reason == "" {
+		reason = "no reason provided"
 	}
-	if report.Reason == "" {
-		report.Reason = "no reason provided"
-	}
+	report := UserReport{ReporterID: authUserID, ReportedID: uint(body.ReportedId()), Reason: reason}
 	if err := db.Create(&report).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"msg": "failed to submit report"})
+		return fbcodec.SendError(c, 500, "failed to submit report")
 	}
-	return c.JSON(fiber.Map{"msg": "report submitted"})
+	return fbcodec.SendEmpty(c, 200, "report submitted")
 }
 
 func ClearChat(c *fiber.Ctx, db *gorm.DB) error {
 	authUserID, ok := c.Locals("userID").(uint)
 	if !ok || authUserID == 0 {
-		return c.Status(401).JSON(fiber.Map{"msg": "unauthorized"})
+		return fbcodec.SendError(c, 401, "unauthorized")
 	}
-	type Req struct {
-		RoomID uint `json:"room_id"`
+	req, err := fbcodec.OpenRequest(c.Body())
+	if err != nil {
+		return fbcodec.SendError(c, 400, "invalid room id")
 	}
-	var req Req
-	if err := c.BodyParser(&req); err != nil || req.RoomID == 0 {
-		return c.Status(400).JSON(fiber.Map{"msg": "invalid room id"})
+	body, err := ParseRoomID(req)
+	if err != nil || body.RoomId() == 0 {
+		return fbcodec.SendError(c, 400, "invalid room id")
 	}
-
-	// Ensure user belongs to this room
 	var rel UserRoom
-	if err := db.Where("room_id = ? AND user_id = ?", req.RoomID, authUserID).First(&rel).Error; err != nil {
-		return c.Status(403).JSON(fiber.Map{"msg": "forbidden"})
+	if err := db.Where("room_id = ? AND user_id = ?", body.RoomId(), authUserID).First(&rel).Error; err != nil {
+		return fbcodec.SendError(c, 403, "forbidden")
 	}
-	if err := db.Where("room_id = ?", req.RoomID).Delete(&Message{}).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"msg": "failed to clear chat"})
+	if err := db.Where("room_id = ?", body.RoomId()).Delete(&Message{}).Error; err != nil {
+		return fbcodec.SendError(c, 500, "failed to clear chat")
 	}
-	return c.JSON(fiber.Map{"msg": "chat cleared"})
+	return fbcodec.SendEmpty(c, 200, "chat cleared")
 }
 
 func ListUsersForAdmin(c *fiber.Ctx, db *gorm.DB) error {
 	adminID := c.Locals("userID").(uint)
 	var admin User
 	if err := db.First(&admin, adminID).Error; err != nil || admin.Status != "admin" {
-		return c.Status(403).JSON(fiber.Map{"msg": "admin access required"})
+		return fbcodec.SendError(c, 403, "admin access required")
 	}
-
 	var users []User
 	if err := db.Order("created_at DESC").Find(&users).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"msg": "failed to fetch users"})
+		return fbcodec.SendError(c, 500, "failed to fetch users")
 	}
-
-	return c.JSON(fiber.Map{"data": users})
+	userPins := make([]fbcodec.UserIn, len(users))
+	for i := range users {
+		userPins[i] = UserToIn(users[i])
+	}
+	return fbcodec.BuildAndSend(c, 200, "ok", "", "", 0, mybroker.ApiPayloadUsersList, 262144, func(b *flatbuffers.Builder) flatbuffers.UOffsetT {
+		return fbcodec.BuildUsersList(b, userPins)
+	})
 }
 
 func ApproveUserID(c *fiber.Ctx, db *gorm.DB) error {
 	adminID := c.Locals("userID").(uint)
 	var admin User
 	if err := db.First(&admin, adminID).Error; err != nil || admin.Status != "admin" {
-		return c.Status(403).JSON(fiber.Map{"msg": "admin access required"})
+		return fbcodec.SendError(c, 403, "admin access required")
 	}
-
-	type Req struct {
-		UserID uint `json:"user_id"`
+	req, err := fbcodec.OpenRequest(c.Body())
+	if err != nil {
+		return fbcodec.SendError(c, 400, "invalid user id")
 	}
-	var req Req
-	if err := c.BodyParser(&req); err != nil || req.UserID == 0 {
-		return c.Status(400).JSON(fiber.Map{"msg": "invalid user id"})
+	body, err := ParseApproveUser(req)
+	if err != nil || body.UserId() == 0 {
+		return fbcodec.SendError(c, 400, "invalid user id")
 	}
-
-	if err := db.Model(&User{}).Where("id = ?", req.UserID).Update("verified", "true").Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"msg": "failed to approve user id"})
+	if err := db.Model(&User{}).Where("id = ?", body.UserId()).Update("verified", "true").Error; err != nil {
+		return fbcodec.SendError(c, 500, "failed to approve user id")
 	}
-	return c.JSON(fiber.Map{"msg": "user id approved"})
+	return fbcodec.SendEmpty(c, 200, "user id approved")
 }

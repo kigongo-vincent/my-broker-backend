@@ -1,9 +1,12 @@
 package core
 
-import "github.com/gofiber/fiber/v2"
+import (
+	"github.com/gofiber/fiber/v2"
+	"github.com/kigongo-vincent/my-broker-backend/fbcodec"
+)
 
 func ThrowNewError(c *fiber.Ctx, msg string) error {
-	return c.Status(400).JSON(fiber.Map{"msg": msg})
+	return fbcodec.SendError(c, 400, msg)
 }
 
 func Trim(s string, limit int) string {

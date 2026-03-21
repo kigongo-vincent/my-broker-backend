@@ -12,6 +12,8 @@ import (
 	user "github.com/kigongo-vincent/my-broker-backend/User"
 	"github.com/kigongo-vincent/my-broker-backend/core"
 	"github.com/kigongo-vincent/my-broker-backend/db"
+	"github.com/kigongo-vincent/my-broker-backend/fbcodec"
+	"github.com/kigongo-vincent/my-broker-backend/wschat"
 )
 
 func main() {
@@ -21,6 +23,8 @@ func main() {
 	// enable cors
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*",
+		AllowMethods: "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+		AllowHeaders: "Origin,Content-Type,Accept,Authorization",
 	}))
 
 	// load env
@@ -31,32 +35,25 @@ func main() {
 	DB := db.ConnectToDB()
 
 	app.Get("/health", func(c *fiber.Ctx) error {
-		return c.JSON(fiber.Map{"msg": "connected"})
+		return fbcodec.SendEmpty(c, 200, "connected")
 	})
 	app.Static("/web", "./web")
 	app.Get("/ws", func(c *fiber.Ctx) error {
 		token := c.Query("token")
 		if strings.TrimSpace(token) == "" {
-			return c.Status(401).JSON(fiber.Map{"msg": "missing token"})
+			return fbcodec.SendError(c, 401, "missing token")
 		}
-		if _, err := core.ParseJWT(token); err != nil {
-			return c.Status(401).JSON(fiber.Map{"msg": "invalid token"})
+		uid, err := core.ParseJWT(token)
+		if err != nil {
+			return fbcodec.SendError(c, 401, "invalid token")
 		}
+		c.Locals("wsUserID", uid)
 		if websocket.IsWebSocketUpgrade(c) {
 			return c.Next()
 		}
 		return fiber.ErrUpgradeRequired
 	}, websocket.New(func(conn *websocket.Conn) {
-		defer conn.Close()
-		for {
-			messageType, msg, err := conn.ReadMessage()
-			if err != nil {
-				break
-			}
-			if err = conn.WriteMessage(messageType, msg); err != nil {
-				break
-			}
-		}
+		wschat.ServeChat(conn, DB)
 	}))
 
 	// routes
