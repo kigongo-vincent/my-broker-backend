@@ -22,6 +22,16 @@ func RegisterRoutes(app *fiber.App, DB *gorm.DB) {
 	user.Post("/google", func(c *fiber.Ctx) error {
 		return GoogleSignin(c, DB)
 	})
+	user.Get("/google/web/start", GoogleWebOAuthStart)
+	user.Get("/google/web/callback", func(c *fiber.Ctx) error {
+		return GoogleWebOAuthCallback(c, DB)
+	})
+	user.Get("/verification-status", middleware.AuthMiddlewareJSON(), func(c *fiber.Ctx) error {
+		return GetVerificationStatusJSON(c, DB)
+	})
+	user.Post("/id-verification", middleware.AuthMiddlewareJSON(), func(c *fiber.Ctx) error {
+		return SubmitIDVerificationJSON(c, DB)
+	})
 	user.Get("/rooms", middleware.AuthMiddleware(), func(c *fiber.Ctx) error {
 		userID := c.Locals("userID").(uint)
 		return GetRooms(c, DB, userID)
@@ -69,6 +79,9 @@ func RegisterRoutes(app *fiber.App, DB *gorm.DB) {
 	})
 	user.Post("/admin/approve-id", middleware.AuthMiddleware(), func(c *fiber.Ctx) error {
 		return ApproveUserID(c, DB)
+	})
+	user.Post("/admin/reject-id", middleware.AuthMiddleware(), func(c *fiber.Ctx) error {
+		return RejectUserID(c, DB)
 	})
 
 }

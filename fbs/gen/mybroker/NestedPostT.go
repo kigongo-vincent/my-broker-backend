@@ -234,8 +234,20 @@ func (rcv *NestedPostT) MutateSelected(n bool) bool {
 	return rcv._tab.MutateBoolSlot(34, n)
 }
 
+func (rcv *NestedPostT) IsAvailable() bool {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(36))
+	if o != 0 {
+		return rcv._tab.GetBool(o + rcv._tab.Pos)
+	}
+	return false
+}
+
+func (rcv *NestedPostT) MutateIsAvailable(n bool) bool {
+	return rcv._tab.MutateBoolSlot(36, n)
+}
+
 func NestedPostTStart(builder *flatbuffers.Builder) {
-	builder.StartObject(16)
+	builder.StartObject(17)
 }
 func NestedPostTAddId(builder *flatbuffers.Builder, id uint32) {
 	builder.PrependUint32Slot(0, id, 0)
@@ -290,6 +302,9 @@ func NestedPostTAddHideUserInfo(builder *flatbuffers.Builder, hideUserInfo bool)
 }
 func NestedPostTAddSelected(builder *flatbuffers.Builder, selected bool) {
 	builder.PrependBoolSlot(15, selected, false)
+}
+func NestedPostTAddIsAvailable(builder *flatbuffers.Builder, isAvailable bool) {
+	builder.PrependBoolSlot(16, isAvailable, false)
 }
 func NestedPostTEnd(builder *flatbuffers.Builder) flatbuffers.UOffsetT {
 	return builder.EndObject()

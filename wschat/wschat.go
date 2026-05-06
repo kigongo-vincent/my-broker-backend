@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	usr "github.com/kigongo-vincent/my-broker-backend/User"
+	"github.com/kigongo-vincent/my-broker-backend/middleware"
 )
 
 type hub struct {
@@ -81,11 +82,11 @@ type outbound struct {
 	ID          uint   `json:"id"`
 }
 
-// ServeChat handles one WebSocket: JWT user id must be in conn Locals as "wsUserID" (uint).
+// ServeChat handles one WebSocket: JWT user id must be in conn Locals (see middleware.WSUserIDLocal).
 func ServeChat(conn *fiberws.Conn, db *gorm.DB) {
 	defer conn.Close()
 
-	uidVal := conn.Locals("wsUserID")
+	uidVal := conn.Locals(middleware.WSUserIDLocal)
 	uid, ok := uidVal.(uint)
 	if !ok || uid == 0 {
 		return

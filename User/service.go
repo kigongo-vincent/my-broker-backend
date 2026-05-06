@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -16,6 +17,12 @@ import (
 	"github.com/kigongo-vincent/my-broker-backend/fbs/gen/mybroker"
 	"gorm.io/gorm"
 )
+
+type GoogleProfile struct {
+	Email   string `json:"email"`
+	Name    string `json:"name"`
+	Picture string `json:"picture"`
+}
 
 // roomChatAggregates loads last message per room and unread counts for viewerUserID.
 // Unread = messages the other person sent that viewer has not read yet (never count viewer's own messages).
@@ -156,51 +163,109 @@ func GoogleSignin(c *fiber.Ctx, db *gorm.DB) error {
 	if err != nil {
 		return fbcodec.SendError(c, 400, "invalid google payload")
 	}
-	access := string(g.AccessToken())
 	idTok := string(g.IdToken())
-	if access == "" && idTok == "" {
-		return fbcodec.SendError(c, 400, "invalid google payload")
+	if idTok == "" {
+		return fbcodec.SendError(c, 400, "id token is required")
 	}
-	type GoogleProfile struct {
-		Email   string `json:"email"`
-		Name    string `json:"name"`
-		Picture string `json:"picture"`
+	clientIDs := configuredGoogleClientIDs()
+	if len(clientIDs) == 0 {
+		return fbcodec.SendError(c, 500, "google oauth is not configured")
 	}
+
 	var profile GoogleProfile
-	if access != "" {
-		httpReq, _ := http.NewRequest(http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
-		httpReq.Header.Set("Authorization", "Bearer "+access)
-		res, err := http.DefaultClient.Do(httpReq)
-		if err != nil || res.StatusCode != http.StatusOK {
-			return fbcodec.SendError(c, 401, "failed to verify google access token")
-		}
-		defer res.Body.Close()
-		if err = json.NewDecoder(res.Body).Decode(&profile); err != nil || profile.Email == "" {
-			return fbcodec.SendError(c, 401, "invalid google profile response")
-		}
+
+	verifiedProfile, err := verifyGoogleIDToken(idTok, clientIDs)
+	if err != nil {
+		return fbcodec.SendError(c, 401, "failed to verify google id token")
 	}
-	var foundUser User
-	if err := db.Where("email = ?", profile.Email).First(&foundUser).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			foundUser = User{
-				Name:        profile.Name,
-				Email:       profile.Email,
-				Photo:       profile.Picture,
-				PhoneNumber: fmt.Sprintf("g_%d", time.Now().UnixNano()),
-				Status:      "user",
-			}
-			if createErr := db.Create(&foundUser).Error; createErr != nil {
-				return fbcodec.SendError(c, 500, "failed to create google user")
-			}
-		} else {
-			return fbcodec.SendError(c, 500, "failed to lookup user")
-		}
+	profile = verifiedProfile
+	if profile.Email == "" {
+		return fbcodec.SendError(c, 401, "google account email not available")
+	}
+	foundUser, err := upsertGoogleUser(db, profile)
+	if err != nil {
+		return fbcodec.SendError(c, 500, "failed to lookup or create google user")
 	}
 	token, err := core.IssueJWT(foundUser.ID)
 	if err != nil {
 		return fbcodec.SendError(c, 500, "failed to issue auth token")
 	}
 	return fbcodec.SendAuthOK(c, "google signin successful", token, UserToIn(foundUser))
+}
+
+// upsertGoogleUser finds or creates a user from a verified Google profile (email verified upstream).
+func upsertGoogleUser(db *gorm.DB, profile GoogleProfile) (User, error) {
+	var foundUser User
+	email := strings.TrimSpace(strings.ToLower(profile.Email))
+	emailPtr := &email
+	createCandidate := User{
+		Name:        profile.Name,
+		Email:       emailPtr,
+		Photo:       profile.Picture,
+		PhoneNumber: fmt.Sprintf("g_%d", time.Now().UnixNano()),
+		Status:      "user",
+	}
+	if err := db.Where("email = ?", email).Attrs(createCandidate).FirstOrCreate(&foundUser).Error; err != nil {
+		return User{}, err
+	}
+	return foundUser, nil
+}
+
+func configuredGoogleClientIDs() []string {
+	keys := []string{
+		"GOOGLE_WEB_CLIENT_ID",
+		"GOOGLE_IOS_CLIENT_ID",
+		"GOOGLE_ANDROID_CLIENT_ID",
+	}
+	ids := make([]string, 0, len(keys))
+	for _, k := range keys {
+		v := strings.TrimSpace(os.Getenv(k))
+		if v != "" {
+			ids = append(ids, v)
+		}
+	}
+	return ids
+}
+
+func verifyGoogleIDToken(idToken string, allowedAudiences []string) (GoogleProfile, error) {
+	endpoint := "https://oauth2.googleapis.com/tokeninfo?id_token=" + url.QueryEscape(idToken)
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return GoogleProfile{}, err
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return GoogleProfile{}, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return GoogleProfile{}, fmt.Errorf("tokeninfo returned %d", res.StatusCode)
+	}
+	type tokenInfo struct {
+		Aud           string `json:"aud"`
+		Email         string `json:"email"`
+		EmailVerified string `json:"email_verified"`
+		Name          string `json:"name"`
+		Picture       string `json:"picture"`
+	}
+	var info tokenInfo
+	if err := json.NewDecoder(res.Body).Decode(&info); err != nil {
+		return GoogleProfile{}, err
+	}
+	matchesAudience := false
+	for _, aud := range allowedAudiences {
+		if info.Aud == aud {
+			matchesAudience = true
+			break
+		}
+	}
+	if !matchesAudience {
+		return GoogleProfile{}, fmt.Errorf("id token audience mismatch")
+	}
+	if info.Email == "" || info.EmailVerified != "true" {
+		return GoogleProfile{}, fmt.Errorf("email not verified")
+	}
+	return GoogleProfile{Email: info.Email, Name: info.Name, Picture: info.Picture}, nil
 }
 
 func GetRooms(c *fiber.Ctx, db *gorm.DB, UserID uint) error {
@@ -552,8 +617,34 @@ func ApproveUserID(c *fiber.Ctx, db *gorm.DB) error {
 	if err != nil || body.UserId() == 0 {
 		return fbcodec.SendError(c, 400, "invalid user id")
 	}
-	if err := db.Model(&User{}).Where("id = ?", body.UserId()).Update("verified", "true").Error; err != nil {
+	if err := db.Model(&User{}).Where("id = ?", body.UserId()).Updates(map[string]any{
+		"verified":               "true",
+		"id_verification_status": "approved",
+	}).Error; err != nil {
 		return fbcodec.SendError(c, 500, "failed to approve user id")
 	}
 	return fbcodec.SendEmpty(c, 200, "user id approved")
+}
+
+func RejectUserID(c *fiber.Ctx, db *gorm.DB) error {
+	adminID := c.Locals("userID").(uint)
+	var admin User
+	if err := db.First(&admin, adminID).Error; err != nil || admin.Status != "admin" {
+		return fbcodec.SendError(c, 403, "admin access required")
+	}
+	req, err := fbcodec.OpenRequest(c.Body())
+	if err != nil {
+		return fbcodec.SendError(c, 400, "invalid user id")
+	}
+	body, err := ParseApproveUser(req)
+	if err != nil || body.UserId() == 0 {
+		return fbcodec.SendError(c, 400, "invalid user id")
+	}
+	if err := db.Model(&User{}).Where("id = ?", body.UserId()).Updates(map[string]any{
+		"verified":               "false",
+		"id_verification_status": "rejected",
+	}).Error; err != nil {
+		return fbcodec.SendError(c, 500, "failed to reject user id")
+	}
+	return fbcodec.SendEmpty(c, 200, "user id rejected")
 }

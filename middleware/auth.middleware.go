@@ -28,3 +28,25 @@ func AuthMiddleware() fiber.Handler {
 		return c.Next()
 	}
 }
+
+// AuthMiddlewareJSON is the same as AuthMiddleware but returns JSON errors for JSON-only routes.
+func AuthMiddlewareJSON() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		token := c.Get("Authorization")
+		if token == "" {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"msg": "missing authorization token"})
+		}
+
+		if strings.HasPrefix(token, "Bearer ") {
+			token = strings.TrimPrefix(token, "Bearer ")
+		}
+
+		userID, err := core.ParseJWT(token)
+		if err != nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"msg": "invalid token"})
+		}
+
+		c.Locals("userID", userID)
+		return c.Next()
+	}
+}

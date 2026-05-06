@@ -29,6 +29,7 @@ type NestedPost struct {
 	Likers       []NestedUser  `json:"likers"`
 	HideUserInfo *bool         `json:"hideUserInfo,omitempty"`
 	Selected     *bool         `json:"selected,omitempty"`
+	IsAvailable  bool          `json:"is_available"`
 }
 
 // NestedUser is a simplified view of domain user fields.

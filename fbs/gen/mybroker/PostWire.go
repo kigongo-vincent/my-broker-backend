@@ -285,8 +285,20 @@ func (rcv *PostWire) LikersLength() int {
 	return 0
 }
 
+func (rcv *PostWire) IsAvailable() bool {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(46))
+	if o != 0 {
+		return rcv._tab.GetBool(o + rcv._tab.Pos)
+	}
+	return false
+}
+
+func (rcv *PostWire) MutateIsAvailable(n bool) bool {
+	return rcv._tab.MutateBoolSlot(46, n)
+}
+
 func PostWireStart(builder *flatbuffers.Builder) {
-	builder.StartObject(21)
+	builder.StartObject(22)
 }
 func PostWireAddId(builder *flatbuffers.Builder, id uint32) {
 	builder.PrependUint32Slot(0, id, 0)
@@ -356,6 +368,9 @@ func PostWireAddLikers(builder *flatbuffers.Builder, likers flatbuffers.UOffsetT
 }
 func PostWireStartLikersVector(builder *flatbuffers.Builder, numElems int) flatbuffers.UOffsetT {
 	return builder.StartVector(4, numElems, 4)
+}
+func PostWireAddIsAvailable(builder *flatbuffers.Builder, isAvailable bool) {
+	builder.PrependBoolSlot(21, isAvailable, false)
 }
 func PostWireEnd(builder *flatbuffers.Builder) flatbuffers.UOffsetT {
 	return builder.EndObject()

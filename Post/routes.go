@@ -31,6 +31,12 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 	posts.Get("/post", func(c *fiber.Ctx) error {
 		return GetPostDetails(c, db)
 	})
+	posts.Post("/mine/delete", middleware.AuthMiddleware(), func(c *fiber.Ctx) error {
+		return DeleteMyPost(c, db)
+	})
+	posts.Get("/mine/availability", middleware.AuthMiddleware(), func(c *fiber.Ctx) error {
+		return SetMyPostAvailability(c, db)
+	})
 	posts.Get("/posts-by-location", func(c *fiber.Ctx) error {
 		return GetPostLocations(c, db)
 	})
@@ -39,6 +45,9 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 	})
 	posts.Post("/admin/approve", middleware.AuthMiddleware(), func(c *fiber.Ctx) error {
 		return ApprovePostByAdmin(c, db)
+	})
+	posts.Post("/admin/reject", middleware.AuthMiddleware(), func(c *fiber.Ctx) error {
+		return RejectPostByAdmin(c, db)
 	})
 
 }

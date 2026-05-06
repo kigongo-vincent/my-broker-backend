@@ -31,6 +31,7 @@ type PostIn struct {
 	RequiredFirstMonthsPaid                                     int
 	Units, Type                                                 string
 	IsNegotiable, IsApproved, ReviewDisclaimerAgreed            bool
+	IsAvailable                                                 bool
 	User                                                        UserIn
 	Likers                                                      []UserIn
 }
@@ -50,6 +51,7 @@ type NestedPostIn struct {
 	Price                        PriceIn
 	Location                     LocationIn
 	IsLiked, IsNegotiable        bool
+	IsAvailable                  bool
 	Bedrooms, Bathrooms, Toilets string
 	Images                       []string
 	Likers                       []UserIn

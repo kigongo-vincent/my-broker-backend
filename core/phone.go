@@ -46,6 +46,24 @@ func NormalizeUGPhoneNumber(raw string) (string, error) {
 	return "", fmt.Errorf("invalid Uganda phone number format")
 }
 
+// SMSDestinationE164 converts a stored Ugandan phone (0…, 256…, +256…) to E.164 for SMS APIs (e.g. AWS SNS).
+func SMSDestinationE164(phone string) string {
+	p := strings.TrimSpace(phone)
+	if p == "" {
+		return p
+	}
+	if strings.HasPrefix(p, "+") {
+		return p
+	}
+	if strings.HasPrefix(p, "256") {
+		return "+" + p
+	}
+	if len(p) == 10 && p[0] == '0' && (p[1] == '7' || p[1] == '3') {
+		return "+256" + p[1:]
+	}
+	return p
+}
+
 func UGPhoneCandidates(normalized string) []string {
 	if len(normalized) == 10 && normalized[0] == '0' && (normalized[1] == '7' || normalized[1] == '3') {
 		withCountry := "256" + normalized[1:]

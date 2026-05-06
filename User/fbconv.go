@@ -7,8 +7,12 @@ import (
 )
 
 func UserToIn(u User) fbcodec.UserIn {
+	email := ""
+	if u.Email != nil {
+		email = *u.Email
+	}
 	return fbcodec.UserIn{
-		ID: u.ID, Name: u.Name, PhoneNumber: u.PhoneNumber, Photo: u.Photo, Email: u.Email,
+		ID: u.ID, Name: u.Name, PhoneNumber: u.PhoneNumber, Photo: u.Photo, Email: email,
 		LastSeen: u.LastSeen, Status: u.Status, Verified: u.Verified, BrokerFees: u.BrokerFees,
 		ShowContact: u.ShowContact, IsBroker: u.IsBroker, AcceptedPS: u.AcceptedPS,
 	}
@@ -28,11 +32,12 @@ func PostToIn(p Post) fbcodec.PostIn {
 		Price:    fbcodec.PriceIn{Currency: p.Price.Currency, Amount: p.Price.Amount},
 		Location: fbcodec.LocationIn{Lat: p.Location.Lat, Lon: p.Location.Lon, Name: p.Location.Name},
 		Bedrooms: p.Bedrooms, Bathrooms: p.Bathrooms, Toilets: p.Toilets,
-		Images: imgs, Amenities: string(p.Ammenities),
+		Images: imgs, Amenities: AmenitiesDisplayString(p.Ammenities),
 		PayWaterBills: p.PayWaterBills, PayElectricityBills: p.PayElectricityBills,
 		PayForTrash: p.PayForTrash, HasParking: p.HasParking,
 		RequiredFirstMonthsPaid: p.RequiredFirstMonthsPaid, Units: p.Units, Type: p.Type,
 		IsNegotiable: p.IsNegotiable, IsApproved: p.IsApproved, ReviewDisclaimerAgreed: p.ReviewDisclaimerAgreed,
+		IsAvailable: p.IsAvailable,
 		User: UserToIn(p.User), Likers: likers,
 	}
 }

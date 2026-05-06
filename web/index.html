@@ -16,18 +16,24 @@
     <p>Manage users, ID approvals, and post moderation.</p>
     <input id="token" type="text" placeholder="Admin JWT token" />
     <br />
-    <button id="load-users">Load users</button>
-    <button id="load-pending-posts">Load pending posts</button>
+    <button id="load-users" type="button">Load users</button>
+    <button id="load-pending-posts" type="button">Load pending posts</button>
     <br />
-    <input id="approve-user-id" type="number" placeholder="User ID to approve identity" />
-    <button id="approve-user">Approve ID</button>
+    <form id="user-review-form">
+      <input id="approve-user-id" type="number" placeholder="User ID to review identity" required />
+      <button id="approve-user" type="submit">Mark ID valid</button>
+      <button id="reject-user" type="button">Mark ID invalid</button>
+    </form>
     <br />
-    <input id="approve-post-id" type="number" placeholder="Post ID to approve" />
-    <button id="approve-post">Approve post</button>
+    <form id="post-review-form">
+      <input id="approve-post-id" type="number" placeholder="Post ID to review" required />
+      <button id="approve-post" type="submit">Mark post valid</button>
+      <button id="reject-post" type="button">Mark post invalid</button>
+    </form>
     <pre id="output"></pre>
 
     <script>
-      const baseUrl = "http://localhost:3000";
+      const baseUrl = "http://localhost:3001";
       const outputEl = document.getElementById("output");
       const tokenEl = document.getElementById("token");
 
@@ -48,12 +54,25 @@
 
       document.getElementById("load-users").onclick = () => request("/auth/admin/users");
       document.getElementById("load-pending-posts").onclick = () => request("/posts/admin/pending");
-      document.getElementById("approve-user").onclick = () =>
+      document.getElementById("user-review-form").onsubmit = (e) => {
+        e.preventDefault();
         request("/auth/admin/approve-id", "POST", {
           user_id: Number(document.getElementById("approve-user-id").value),
         });
-      document.getElementById("approve-post").onclick = () =>
+      };
+      document.getElementById("reject-user").onclick = () =>
+        request("/auth/admin/reject-id", "POST", {
+          user_id: Number(document.getElementById("approve-user-id").value),
+        });
+
+      document.getElementById("post-review-form").onsubmit = (e) => {
+        e.preventDefault();
         request("/posts/admin/approve", "POST", {
+          post_id: Number(document.getElementById("approve-post-id").value),
+        });
+      };
+      document.getElementById("reject-post").onclick = () =>
+        request("/posts/admin/reject", "POST", {
           post_id: Number(document.getElementById("approve-post-id").value),
         });
     </script>

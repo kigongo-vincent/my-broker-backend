@@ -36,30 +36,41 @@ type Post struct {
 	Units                   string         `json:"units" gorm:"not null;default:'1'"`
 	IsNegotiable            bool           `json:"is_negotiable"`
 	IsApproved              bool           `json:"is_approved" gorm:"default:false"`
+	IsAvailable             bool           `json:"is_available" gorm:"not null;default:true"`
 	ReviewDisclaimerAgreed  bool           `json:"review_disclaimer_agreed" gorm:"not null;default:false"`
 	Type                    string         `json:"type" gorm:"not null;default:''"`
 }
 
 type User struct {
 	gorm.Model
-	Name        string `json:"name" gorm:"not null;default:''"`
-	PhoneNumber string `json:"phone_number" gorm:"not null;uniqueIndex" validate:"required"`
-	OTP         int    `json:"otp"`
-	Photo       string `json:"photo" gorm:"not null;default:''"`
-	Email       string `json:"email" gorm:"omit-empty"`
-	LastSeen    string `json:"last_seen" gorm:"not null;default:''"`
-	Status      string `json:"status" gorm:"default:'user'"`
-	Verified    string `json:"verified" gorm:"default:false"`
-	IsBroker    bool   `json:"is_broker" gorm:"default:false"`
-	BrokerFees  string `json:"broker_fees" gorm:"default:''"`
-	AcceptedPS  bool   `json:"accepted_ps" gorm:"default:false"`
-	Rooms       []Room `json:"rooms" gorm:"many2many:user_rooms"`
-	ShowContact bool   `json:"show_contact" gorm:"default:true"`
-	Liked       []Post `json:"liked" gorm:"many2many:post_likes"`
+	Name        string  `json:"name" gorm:"not null;default:''"`
+	PhoneNumber string  `json:"phone_number" gorm:"not null;uniqueIndex" validate:"required"`
+	OTP         int     `json:"otp"`
+	Photo       string  `json:"photo" gorm:"not null;default:''"`
+	Email       *string `json:"email,omitempty"`
+	LastSeen    string  `json:"last_seen" gorm:"not null;default:''"`
+	Status      string  `json:"status" gorm:"default:'user'"`
+	Verified    string  `json:"verified" gorm:"default:false"`
+	IsBroker    bool    `json:"is_broker" gorm:"default:false"`
+	BrokerFees  string  `json:"broker_fees" gorm:"default:''"`
+	AcceptedPS  bool    `json:"accepted_ps" gorm:"default:false"`
+	Rooms       []Room  `json:"rooms" gorm:"many2many:user_rooms"`
+	ShowContact bool    `json:"show_contact" gorm:"default:true"`
+	Liked       []Post  `json:"liked" gorm:"many2many:post_likes"`
+
+	// ID verification (admin approves via existing approve-id; URLs stored for review)
+	IDVerificationSelfie   string `json:"id_verification_selfie" gorm:"not null;default:''"`
+	IDVerificationDocument string `json:"id_verification_document" gorm:"not null;default:''"`
+	IDVerificationStatus   string `json:"id_verification_status" gorm:"not null;default:''"` // submitted | approved | rejected
 }
 
 type UserRoom struct {
 	RoomID uint
+	UserID uint
+}
+
+type PostLike struct {
+	PostID uint
 	UserID uint
 }
 

@@ -44,6 +44,7 @@ func SeedDatabase(db *gorm.DB) error {
 		name := fmt.Sprintf("%s %s", firstNames[r.Intn(len(firstNames))], lastNames[r.Intn(len(lastNames))])
 		phone := fmt.Sprintf("+2567%08d", 10000000+i)
 		email := fmt.Sprintf("user%d@mybroker.ug", i+1)
+		emailPtr := &email
 		status := "user"
 		if i < 2 {
 			status = "admin"
@@ -53,7 +54,7 @@ func SeedDatabase(db *gorm.DB) error {
 		users = append(users, user.User{
 			Name:        name,
 			PhoneNumber: phone,
-			Email:       email,
+			Email:       emailPtr,
 			Photo:       "https://images.unsplash.com/photo-1544005313-94ddf0286df2",
 			LastSeen:    time.Now().Add(-time.Duration(r.Intn(120)) * time.Minute).Format(time.RFC3339),
 			Status:      status,

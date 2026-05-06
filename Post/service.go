@@ -15,6 +15,13 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+func userEmailValue(email *string) string {
+	if email == nil {
+		return ""
+	}
+	return *email
+}
+
 func CreatePost(ctx *fiber.Ctx, db *gorm.DB) error {
 	uid, ok := ctx.Locals("userID").(uint)
 	if !ok || uid == 0 {
@@ -33,6 +40,7 @@ func CreatePost(ctx *fiber.Ctx, db *gorm.DB) error {
 		return fbcodec.SendError(ctx, 400, err.Error())
 	}
 	created.UserID = uid
+	created.IsAvailable = true
 	if !created.ReviewDisclaimerAgreed {
 		return fbcodec.SendError(ctx, 400, "review disclaimer must be accepted")
 	}
@@ -69,7 +77,7 @@ func GetPaginatedPosts(c *fiber.Ctx, db *gorm.DB) error {
 	if limit < 1 || limit > 100 {
 		limit = 10
 	}
-	dbQuery := db.Where("is_approved = ?", true)
+	dbQuery := db.Where("is_approved = ? AND is_available = ?", true, true)
 	dbQuery = applyFilters(c, dbQuery, db)
 	countQuery := dbQuery.Model(&usr.Post{})
 	if err := countQuery.Count(&total).Error; err != nil {
@@ -211,7 +219,7 @@ func GetPostByID(c *fiber.Ctx, db *gorm.DB) error {
 func GetPostLocations(c *fiber.Ctx, db *gorm.DB) error {
 	var postLocations []PostLocationI
 	var posts []usr.Post
-	if err := db.Where("is_approved = ?", true).Find(&posts).Error; err != nil {
+	if err := db.Where("is_approved = ? AND is_available = ?", true, true).Find(&posts).Error; err != nil {
 		return core.ThrowNewError(c, "failed to get posts")
 	}
 	for _, p := range posts {
@@ -243,6 +251,13 @@ func GetPostDetails(c *fiber.Ctx, db *gorm.DB) error {
 	if err := db.Preload("User").Preload("Likers").First(&post, uint(PostID)).Error; err != nil {
 		return core.ThrowNewError(c, "failed to get the post")
 	}
+	viewerID, _ := c.Locals("userID").(uint)
+	if !post.IsAvailable && post.UserID != viewerID {
+		var viewer usr.User
+		if viewerID == 0 || db.First(&viewer, viewerID).Error != nil || viewer.Status != "admin" {
+			return core.ThrowNewError(c, "post not found")
+		}
+	}
 	np := TransformPost(post)
 	return fbcodec.BuildAndSend(c, 200, "ok", "", "", 0, mybroker.ApiPayloadNestedPostT, 65536, func(b *flatbuffers.Builder) flatbuffers.UOffsetT {
 		return fbcodec.BuildNestedPostT(b, nestedPostToIn(np))
@@ -257,29 +272,35 @@ func TransformPost(p usr.Post) NestedPost {
 	likers := make([]NestedUser, len(p.Likers))
 	for i, l := range p.Likers {
 		likers[i] = NestedUser{
-			ID: l.ID, Name: l.Name, PhoneNumber: l.PhoneNumber, Photo: l.Photo, Email: l.Email,
+			ID: l.ID, Name: l.Name, PhoneNumber: l.PhoneNumber, Photo: l.Photo, Email: userEmailValue(l.Email),
 			LastSeen: l.LastSeen, Status: l.Status, Verified: l.Verified, ShowContact: l.ShowContact,
 		}
 	}
 	author := &NestedUser{
-		ID: p.User.ID, Name: p.User.Name, PhoneNumber: p.User.PhoneNumber, Photo: p.User.Photo, Email: p.User.Email,
+		ID: p.User.ID, Name: p.User.Name, PhoneNumber: p.User.PhoneNumber, Photo: p.User.Photo, Email: userEmailValue(p.User.Email),
 		LastSeen: p.User.LastSeen, Status: p.User.Status, Verified: p.User.Verified, ShowContact: p.User.ShowContact,
 	}
 	return NestedPost{
 		ID: p.ID, Id: p.ID, Type: p.Type, Author: author, User: author, Price: p.Price, Location: p.Location,
 		IsLiked: false, Bedrooms: p.Bedrooms, Bathrooms: p.Bathrooms, Toilets: p.Toilets, Images: images,
-		Likers: likers, IsNegotiable: p.IsNegotiable,
+		Likers: likers, IsNegotiable: p.IsNegotiable, IsAvailable: p.IsAvailable,
 	}
 }
 
 func GetFavourites(c *fiber.Ctx, db *gorm.DB, UserID uint) error {
 	var uu usr.User
-	if err := db.Preload("Liked.Likers").Preload("Liked").First(&uu, UserID).Error; err != nil {
+	if err := db.Preload("Liked.User").Preload("Liked.Likers").Preload("Liked").First(&uu, UserID).Error; err != nil {
 		return core.ThrowNewError(c, "failed to get user")
 	}
-	lPins := make([]fbcodec.PostIn, len(uu.Liked))
-	for i := range uu.Liked {
-		lPins[i] = postModelToWire(uu.Liked[i])
+	liked := make([]usr.Post, 0, len(uu.Liked))
+	for _, p := range uu.Liked {
+		if p.IsApproved && p.IsAvailable {
+			liked = append(liked, p)
+		}
+	}
+	lPins := make([]fbcodec.PostIn, len(liked))
+	for i := range liked {
+		lPins[i] = postModelToWire(liked[i])
 	}
 	return fbcodec.BuildAndSend(c, 200, "ok", "", "", 0, mybroker.ApiPayloadPostList, 131072, func(b *flatbuffers.Builder) flatbuffers.UOffsetT {
 		return fbcodec.BuildPostList(b, lPins)
@@ -317,7 +338,7 @@ func nestedPostToIn(np NestedPost) fbcodec.NestedPostIn {
 		ID: np.ID, Id: np.Id, Type: np.Type,
 		Price:    fbcodec.PriceIn{Currency: np.Price.Currency, Amount: np.Price.Amount},
 		Location: fbcodec.LocationIn{Lat: np.Location.Lat, Lon: np.Location.Lon, Name: np.Location.Name},
-		IsLiked:  np.IsLiked, IsNegotiable: np.IsNegotiable, Bedrooms: np.Bedrooms,
+		IsLiked: np.IsLiked, IsNegotiable: np.IsNegotiable, IsAvailable: np.IsAvailable, Bedrooms: np.Bedrooms,
 		Bathrooms: np.Bathrooms, Toilets: np.Toilets, Images: np.Images,
 		HideUserInfo: np.HideUserInfo, Selected: np.Selected,
 	}
@@ -353,4 +374,82 @@ func ApprovePostByAdmin(c *fiber.Ctx, db *gorm.DB) error {
 		return fbcodec.SendError(c, 500, "failed to approve post")
 	}
 	return fbcodec.SendEmpty(c, 200, "post approved")
+}
+
+func RejectPostByAdmin(c *fiber.Ctx, db *gorm.DB) error {
+	adminID := c.Locals("userID").(uint)
+	var admin usr.User
+	if err := db.First(&admin, adminID).Error; err != nil || admin.Status != "admin" {
+		return fbcodec.SendError(c, 403, "admin access required")
+	}
+	req, err := fbcodec.OpenRequest(c.Body())
+	if err != nil {
+		return fbcodec.SendError(c, 400, err.Error())
+	}
+	body, err := ParseApprovePost(req)
+	if err != nil || body.PostId() == 0 {
+		return fbcodec.SendError(c, 400, "invalid post id")
+	}
+	if err := db.Model(&usr.Post{}).Where("id = ?", body.PostId()).Update("is_approved", false).Error; err != nil {
+		return fbcodec.SendError(c, 500, "failed to reject post")
+	}
+	return fbcodec.SendEmpty(c, 200, "post rejected")
+}
+
+// DeleteMyPost removes a listing owned by the authenticated user.
+func DeleteMyPost(c *fiber.Ctx, db *gorm.DB) error {
+	uid, ok := c.Locals("userID").(uint)
+	if !ok || uid == 0 {
+		return fbcodec.SendError(c, 401, "unauthorized")
+	}
+	req, err := fbcodec.OpenRequest(c.Body())
+	if err != nil {
+		return fbcodec.SendError(c, 400, err.Error())
+	}
+	body, err := usr.ParsePostID(req)
+	if err != nil || body.PostId() == 0 {
+		return fbcodec.SendError(c, 400, "invalid post id")
+	}
+	pid := uint(body.PostId())
+	var p usr.Post
+	if err := db.First(&p, pid).Error; err != nil {
+		return fbcodec.SendError(c, 404, "post not found")
+	}
+	if p.UserID != uid {
+		return fbcodec.SendError(c, 403, "forbidden")
+	}
+	if err := db.Exec(`DELETE FROM post_likes WHERE post_id = ?`, pid).Error; err != nil {
+		return fbcodec.SendError(c, 500, "failed to delete likes")
+	}
+	if err := db.Delete(&usr.Post{}, pid).Error; err != nil {
+		return fbcodec.SendError(c, 500, "failed to delete post")
+	}
+	return fbcodec.SendEmpty(c, 200, "post deleted")
+}
+
+// SetMyPostAvailability sets is_available for the author's listing (hides from public feed when false).
+func SetMyPostAvailability(c *fiber.Ctx, db *gorm.DB) error {
+	uid, ok := c.Locals("userID").(uint)
+	if !ok || uid == 0 {
+		return fbcodec.SendError(c, 401, "unauthorized")
+	}
+	postID, err := strconv.ParseUint(c.Query("post_id"), 10, 32)
+	if err != nil || postID == 0 {
+		return fbcodec.SendError(c, 400, "invalid post_id")
+	}
+	available, err := strconv.ParseBool(c.Query("available"))
+	if err != nil {
+		return fbcodec.SendError(c, 400, "available must be true or false")
+	}
+	var p usr.Post
+	if err := db.First(&p, uint(postID)).Error; err != nil {
+		return fbcodec.SendError(c, 404, "post not found")
+	}
+	if p.UserID != uid {
+		return fbcodec.SendError(c, 403, "forbidden")
+	}
+	if err := db.Model(&p).Update("is_available", available).Error; err != nil {
+		return fbcodec.SendError(c, 500, "failed to update availability")
+	}
+	return fbcodec.SendEmpty(c, 200, "availability updated")
 }

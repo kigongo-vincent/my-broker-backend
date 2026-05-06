@@ -113,6 +113,7 @@ func BuildPostWire(b *flatbuffers.Builder, p PostIn) flatbuffers.UOffsetT {
 	ty := str(b, p.Type)
 
 	mybroker.PostWireStart(b)
+	mybroker.PostWireAddIsAvailable(b, p.IsAvailable)
 	mybroker.PostWireAddLikers(b, likVec)
 	mybroker.PostWireAddUser(b, userOff)
 	mybroker.PostWireAddType(b, ty)
@@ -184,6 +185,7 @@ func BuildNestedPostT(b *flatbuffers.Builder, np NestedPostIn) flatbuffers.UOffs
 	}
 
 	mybroker.NestedPostTStart(b)
+	mybroker.NestedPostTAddIsAvailable(b, np.IsAvailable)
 	mybroker.NestedPostTAddSelected(b, sel)
 	mybroker.NestedPostTAddHideUserInfo(b, hide)
 	mybroker.NestedPostTAddLikers(b, likVec)
@@ -295,6 +297,7 @@ func BuildPostWireMinimal(b *flatbuffers.Builder, p PostIn) flatbuffers.UOffsetT
 		mybroker.PostWireStartLikersVector(b, 0)
 		emptyLik := b.EndVector(0)
 		mybroker.PostWireStart(b)
+		mybroker.PostWireAddIsAvailable(b, true)
 		mybroker.PostWireAddLikers(b, emptyLik)
 		mybroker.PostWireAddUser(b, u0)
 		mybroker.PostWireAddType(b, emptyStr)

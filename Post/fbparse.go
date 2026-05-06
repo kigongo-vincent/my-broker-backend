@@ -62,7 +62,11 @@ func PostFromCreateBody(body *mybroker.CreatePostBody) (usr.Post, error) {
 	}
 	amen := string(body.Amenities())
 	if amen != "" {
-		p.Ammenities = datatypes.JSON(amen)
+		raw, err := json.Marshal(amen)
+		if err != nil {
+			return p, err
+		}
+		p.Ammenities = datatypes.JSON(raw)
 	}
 	return p, nil
 }
