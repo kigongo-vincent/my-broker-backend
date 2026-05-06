@@ -497,6 +497,22 @@ func UpdateLastSeen(c *fiber.Ctx, db *gorm.DB) error {
 	return fbcodec.SendEmpty(c, 202, "")
 }
 
+// SyncSession returns the current user row for the JWT bearer so clients can refresh local profile after cold start.
+func SyncSession(c *fiber.Ctx, db *gorm.DB) error {
+	userID, ok := c.Locals("userID").(uint)
+	if !ok || userID == 0 {
+		return fbcodec.SendError(c, 401, "unauthorized")
+	}
+	var u User
+	if err := db.First(&u, userID).Error; err != nil {
+		return fbcodec.SendError(c, 401, "user not found")
+	}
+	auth := strings.TrimSpace(c.Get("Authorization"))
+	auth = strings.TrimPrefix(auth, "Bearer ")
+	auth = strings.TrimSpace(auth)
+	return fbcodec.SendAuthOK(c, "session synchronized", auth, UserToIn(u))
+}
+
 func GetProfileByID(c *fiber.Ctx, db *gorm.DB) error {
 	userID := c.Query("user_id")
 	if userID == "" {

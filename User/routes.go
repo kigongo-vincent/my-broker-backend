@@ -61,6 +61,9 @@ func RegisterRoutes(app *fiber.App, DB *gorm.DB) {
 	user.Post("/last-seen", middleware.AuthMiddleware(), func(c *fiber.Ctx) error {
 		return UpdateLastSeen(c, DB)
 	})
+	user.Post("/sync-session", middleware.AuthMiddleware(), func(c *fiber.Ctx) error {
+		return SyncSession(c, DB)
+	})
 	user.Get("/profile", func(c *fiber.Ctx) error {
 		return GetProfileByID(c, DB)
 	})
