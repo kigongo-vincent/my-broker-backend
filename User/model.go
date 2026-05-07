@@ -46,11 +46,13 @@ type User struct {
 	Name        string  `json:"name" gorm:"not null;default:''"`
 	PhoneNumber string  `json:"phone_number" gorm:"not null;uniqueIndex" validate:"required"`
 	OTP         int     `json:"otp"`
+	// PinHash is bcrypt hash of numeric PIN; empty means user must set PIN (legacy OTP users or new flow).
+	PinHash string `json:"-" gorm:"not null;default:''"`
 	Photo       string  `json:"photo" gorm:"not null;default:''"`
 	Email       *string `json:"email,omitempty"`
 	LastSeen    string  `json:"last_seen" gorm:"not null;default:''"`
 	Status      string  `json:"status" gorm:"default:'user'"`
-	Verified    string  `json:"verified" gorm:"default:false"`
+	Verified    string  `json:"verified" gorm:"not null;default:'false'"` // admin ID verification; only "true" shows badge
 	IsBroker    bool    `json:"is_broker" gorm:"default:false"`
 	BrokerFees  string  `json:"broker_fees" gorm:"default:''"`
 	AcceptedPS  bool    `json:"accepted_ps" gorm:"default:false"`

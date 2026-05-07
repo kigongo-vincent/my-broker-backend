@@ -67,3 +67,48 @@ func SubmitIDVerificationJSON(c *fiber.Ctx, db *gorm.DB) error {
 	}
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"msg": "verification submitted"})
 }
+
+type pendingIDVerificationRow struct {
+	ID          uint   `json:"id"`
+	Name        string `json:"name"`
+	Email       string `json:"email"`
+	PhoneNumber string `json:"phone_number"`
+	LastSeen    string `json:"last_seen"`
+	Photo       string `json:"photo"`
+	SelfieURL   string `json:"selfie_url"`
+	DocumentURL string `json:"document_url"`
+}
+
+// ListPendingIDVerificationsForAdmin returns users awaiting ID review (admin only).
+func ListPendingIDVerificationsForAdmin(c *fiber.Ctx, db *gorm.DB) error {
+	adminID, ok := c.Locals("userID").(uint)
+	if !ok || adminID == 0 {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"msg": "unauthorized"})
+	}
+	var admin User
+	if err := db.First(&admin, adminID).Error; err != nil || admin.Status != "admin" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"msg": "admin access required"})
+	}
+	var rows []User
+	if err := db.Where("id_verification_status = ?", "submitted").Order("updated_at DESC").Find(&rows).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"msg": "failed to fetch verification queue"})
+	}
+	out := make([]pendingIDVerificationRow, 0, len(rows))
+	for _, u := range rows {
+		email := ""
+		if u.Email != nil {
+			email = strings.TrimSpace(*u.Email)
+		}
+		out = append(out, pendingIDVerificationRow{
+			ID:          u.ID,
+			Name:        u.Name,
+			Email:       email,
+			PhoneNumber: u.PhoneNumber,
+			LastSeen:    strings.TrimSpace(u.LastSeen),
+			Photo:       u.Photo,
+			SelfieURL:   u.IDVerificationSelfie,
+			DocumentURL: u.IDVerificationDocument,
+		})
+	}
+	return c.JSON(out)
+}

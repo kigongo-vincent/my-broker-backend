@@ -7,54 +7,72 @@ import "strconv"
 type ReqPayload byte
 
 const (
-	ReqPayloadNONE              ReqPayload = 0
-	ReqPayloadSignInPhone       ReqPayload = 1
-	ReqPayloadVerifyOtpBody     ReqPayload = 2
-	ReqPayloadGoogleAuthBody    ReqPayload = 3
-	ReqPayloadCreatePostBody    ReqPayload = 4
-	ReqPayloadUpdateProfileBody ReqPayload = 5
-	ReqPayloadBlockBody         ReqPayload = 6
-	ReqPayloadReportBody        ReqPayload = 7
-	ReqPayloadRoomIdBody        ReqPayload = 8
-	ReqPayloadPostIdBody        ReqPayload = 9
-	ReqPayloadApprovePostBody   ReqPayload = 10
-	ReqPayloadApproveUserBody   ReqPayload = 11
-	ReqPayloadUpdateIdBody      ReqPayload = 12
-	ReqPayloadEmptyReq          ReqPayload = 13
+	ReqPayloadNONE                   ReqPayload = 0
+	ReqPayloadSignInPhone            ReqPayload = 1
+	ReqPayloadVerifyOtpBody          ReqPayload = 2
+	ReqPayloadGoogleAuthBody         ReqPayload = 3
+	ReqPayloadCreatePostBody         ReqPayload = 4
+	ReqPayloadUpdateProfileBody      ReqPayload = 5
+	ReqPayloadBlockBody              ReqPayload = 6
+	ReqPayloadReportBody             ReqPayload = 7
+	ReqPayloadRoomIdBody             ReqPayload = 8
+	ReqPayloadPostIdBody             ReqPayload = 9
+	ReqPayloadApprovePostBody        ReqPayload = 10
+	ReqPayloadApproveUserBody        ReqPayload = 11
+	ReqPayloadUpdateIdBody           ReqPayload = 12
+	ReqPayloadPhonePinBody           ReqPayload = 13
+	ReqPayloadRequestPinResetBody    ReqPayload = 14
+	ReqPayloadConfirmPinResetBody    ReqPayload = 15
+	ReqPayloadRequestEmailChangeBody ReqPayload = 16
+	ReqPayloadConfirmEmailChangeBody ReqPayload = 17
+	ReqPayloadPinResetResolveBody    ReqPayload = 18
+	ReqPayloadEmptyReq               ReqPayload = 19
 )
 
 var EnumNamesReqPayload = map[ReqPayload]string{
-	ReqPayloadNONE:              "NONE",
-	ReqPayloadSignInPhone:       "SignInPhone",
-	ReqPayloadVerifyOtpBody:     "VerifyOtpBody",
-	ReqPayloadGoogleAuthBody:    "GoogleAuthBody",
-	ReqPayloadCreatePostBody:    "CreatePostBody",
-	ReqPayloadUpdateProfileBody: "UpdateProfileBody",
-	ReqPayloadBlockBody:         "BlockBody",
-	ReqPayloadReportBody:        "ReportBody",
-	ReqPayloadRoomIdBody:        "RoomIdBody",
-	ReqPayloadPostIdBody:        "PostIdBody",
-	ReqPayloadApprovePostBody:   "ApprovePostBody",
-	ReqPayloadApproveUserBody:   "ApproveUserBody",
-	ReqPayloadUpdateIdBody:      "UpdateIdBody",
-	ReqPayloadEmptyReq:          "EmptyReq",
+	ReqPayloadNONE:                   "NONE",
+	ReqPayloadSignInPhone:            "SignInPhone",
+	ReqPayloadVerifyOtpBody:          "VerifyOtpBody",
+	ReqPayloadGoogleAuthBody:         "GoogleAuthBody",
+	ReqPayloadCreatePostBody:         "CreatePostBody",
+	ReqPayloadUpdateProfileBody:      "UpdateProfileBody",
+	ReqPayloadBlockBody:              "BlockBody",
+	ReqPayloadReportBody:             "ReportBody",
+	ReqPayloadRoomIdBody:             "RoomIdBody",
+	ReqPayloadPostIdBody:             "PostIdBody",
+	ReqPayloadApprovePostBody:        "ApprovePostBody",
+	ReqPayloadApproveUserBody:        "ApproveUserBody",
+	ReqPayloadUpdateIdBody:           "UpdateIdBody",
+	ReqPayloadPhonePinBody:           "PhonePinBody",
+	ReqPayloadRequestPinResetBody:    "RequestPinResetBody",
+	ReqPayloadConfirmPinResetBody:    "ConfirmPinResetBody",
+	ReqPayloadRequestEmailChangeBody: "RequestEmailChangeBody",
+	ReqPayloadConfirmEmailChangeBody: "ConfirmEmailChangeBody",
+	ReqPayloadPinResetResolveBody:    "PinResetResolveBody",
+	ReqPayloadEmptyReq:               "EmptyReq",
 }
 
 var EnumValuesReqPayload = map[string]ReqPayload{
-	"NONE":              ReqPayloadNONE,
-	"SignInPhone":       ReqPayloadSignInPhone,
-	"VerifyOtpBody":     ReqPayloadVerifyOtpBody,
-	"GoogleAuthBody":    ReqPayloadGoogleAuthBody,
-	"CreatePostBody":    ReqPayloadCreatePostBody,
-	"UpdateProfileBody": ReqPayloadUpdateProfileBody,
-	"BlockBody":         ReqPayloadBlockBody,
-	"ReportBody":        ReqPayloadReportBody,
-	"RoomIdBody":        ReqPayloadRoomIdBody,
-	"PostIdBody":        ReqPayloadPostIdBody,
-	"ApprovePostBody":   ReqPayloadApprovePostBody,
-	"ApproveUserBody":   ReqPayloadApproveUserBody,
-	"UpdateIdBody":      ReqPayloadUpdateIdBody,
-	"EmptyReq":          ReqPayloadEmptyReq,
+	"NONE":                   ReqPayloadNONE,
+	"SignInPhone":            ReqPayloadSignInPhone,
+	"VerifyOtpBody":          ReqPayloadVerifyOtpBody,
+	"GoogleAuthBody":         ReqPayloadGoogleAuthBody,
+	"CreatePostBody":         ReqPayloadCreatePostBody,
+	"UpdateProfileBody":      ReqPayloadUpdateProfileBody,
+	"BlockBody":              ReqPayloadBlockBody,
+	"ReportBody":             ReqPayloadReportBody,
+	"RoomIdBody":             ReqPayloadRoomIdBody,
+	"PostIdBody":             ReqPayloadPostIdBody,
+	"ApprovePostBody":        ReqPayloadApprovePostBody,
+	"ApproveUserBody":        ReqPayloadApproveUserBody,
+	"UpdateIdBody":           ReqPayloadUpdateIdBody,
+	"PhonePinBody":           ReqPayloadPhonePinBody,
+	"RequestPinResetBody":    ReqPayloadRequestPinResetBody,
+	"ConfirmPinResetBody":    ReqPayloadConfirmPinResetBody,
+	"RequestEmailChangeBody": ReqPayloadRequestEmailChangeBody,
+	"ConfirmEmailChangeBody": ReqPayloadConfirmEmailChangeBody,
+	"PinResetResolveBody":    ReqPayloadPinResetResolveBody,
+	"EmptyReq":               ReqPayloadEmptyReq,
 }
 
 func (v ReqPayload) String() string {

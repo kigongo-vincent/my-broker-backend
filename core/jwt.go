@@ -4,7 +4,6 @@ import (
 	"errors"
 	"log"
 	"os"
-	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -25,8 +24,6 @@ func IssueJWT(userID uint) (string, error) {
 
 	claims := jwt.MapClaims{
 		"uid": float64(userID),
-		"exp": time.Now().Add(30 * 24 * time.Hour).Unix(),
-		"iat": time.Now().Unix(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(secret))
@@ -35,7 +32,8 @@ func IssueJWT(userID uint) (string, error) {
 func ParseJWT(tokenString string) (uint, error) {
 	secret := jwtSecret()
 
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
+	token, err := parser.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("unexpected signing method")
 		}

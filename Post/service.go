@@ -7,6 +7,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	flatbuffers "github.com/google/flatbuffers/go"
+	cld "github.com/kigongo-vincent/my-broker-backend/Cloudinary"
 	usr "github.com/kigongo-vincent/my-broker-backend/User"
 	"github.com/kigongo-vincent/my-broker-backend/core"
 	"github.com/kigongo-vincent/my-broker-backend/fbcodec"
@@ -151,6 +152,9 @@ func applyFilters(c *fiber.Ctx, query *gorm.DB, db *gorm.DB) *gorm.DB {
 			query = query.Where("toilets = ?", toilets)
 		}
 	}
+	if postType := c.Query("type"); postType != "" && postType != "undefined" {
+		query = query.Where("type = ?", postType)
+	}
 	return query
 }
 
@@ -258,9 +262,8 @@ func GetPostDetails(c *fiber.Ctx, db *gorm.DB) error {
 			return core.ThrowNewError(c, "post not found")
 		}
 	}
-	np := TransformPost(post)
-	return fbcodec.BuildAndSend(c, 200, "ok", "", "", 0, mybroker.ApiPayloadNestedPostT, 65536, func(b *flatbuffers.Builder) flatbuffers.UOffsetT {
-		return fbcodec.BuildNestedPostT(b, nestedPostToIn(np))
+	return fbcodec.BuildAndSend(c, 200, "ok", "", "", 0, mybroker.ApiPayloadPostList, 65536, func(b *flatbuffers.Builder) flatbuffers.UOffsetT {
+		return fbcodec.BuildPostList(b, []fbcodec.PostIn{postModelToWire(post)})
 	})
 }
 
@@ -313,16 +316,46 @@ func GetPendingPostsForAdmin(c *fiber.Ctx, db *gorm.DB) error {
 	if err := db.First(&admin, adminID).Error; err != nil || admin.Status != "admin" {
 		return fbcodec.SendError(c, 403, "admin access required")
 	}
+
+	pageStr := c.Query("page")
+	limitStr := c.Query("limit")
+	if pageStr == "" || limitStr == "" {
+		return fbcodec.SendError(c, 400, "page and limit are required")
+	}
+	page, pageErr := strconv.Atoi(pageStr)
+	limit, limitErr := strconv.Atoi(limitStr)
+	if pageErr != nil || limitErr != nil {
+		return fbcodec.SendError(c, 400, "invalid page or limit value")
+	}
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 10
+	}
+
+	var total int64
+	countQ := db.Model(&usr.Post{}).Where("is_approved = ?", false)
+	if err := countQ.Count(&total).Error; err != nil {
+		return fbcodec.SendError(c, 500, "failed to count pending posts")
+	}
+
 	var posts []usr.Post
-	if err := db.Where("is_approved = ?", false).Preload("User").Order("created_at DESC").Find(&posts).Error; err != nil {
+	if err := db.Where("is_approved = ?", false).
+		Preload("User").
+		Preload("Likers").
+		Order("created_at DESC").
+		Limit(limit).
+		Offset((page - 1) * limit).
+		Find(&posts).Error; err != nil {
 		return fbcodec.SendError(c, 500, "failed to fetch pending posts")
 	}
 	pendPins := make([]fbcodec.PostIn, len(posts))
 	for i := range posts {
 		pendPins[i] = postModelToWire(posts[i])
 	}
-	return fbcodec.BuildAndSend(c, 200, "ok", "", "", 0, mybroker.ApiPayloadPostList, 131072, func(b *flatbuffers.Builder) flatbuffers.UOffsetT {
-		return fbcodec.BuildPostList(b, pendPins)
+	return fbcodec.BuildAndSend(c, 200, "ok", "", "", 0, mybroker.ApiPayloadPostPage, 131072, func(b *flatbuffers.Builder) flatbuffers.UOffsetT {
+		return fbcodec.BuildPostPage(b, pendPins, total, page, limit)
 	})
 }
 
@@ -338,7 +371,7 @@ func nestedPostToIn(np NestedPost) fbcodec.NestedPostIn {
 		ID: np.ID, Id: np.Id, Type: np.Type,
 		Price:    fbcodec.PriceIn{Currency: np.Price.Currency, Amount: np.Price.Amount},
 		Location: fbcodec.LocationIn{Lat: np.Location.Lat, Lon: np.Location.Lon, Name: np.Location.Name},
-		IsLiked: np.IsLiked, IsNegotiable: np.IsNegotiable, IsAvailable: np.IsAvailable, Bedrooms: np.Bedrooms,
+		IsLiked:  np.IsLiked, IsNegotiable: np.IsNegotiable, IsAvailable: np.IsAvailable, Bedrooms: np.Bedrooms,
 		Bathrooms: np.Bathrooms, Toilets: np.Toilets, Images: np.Images,
 		HideUserInfo: np.HideUserInfo, Selected: np.Selected,
 	}
@@ -390,7 +423,23 @@ func RejectPostByAdmin(c *fiber.Ctx, db *gorm.DB) error {
 	if err != nil || body.PostId() == 0 {
 		return fbcodec.SendError(c, 400, "invalid post id")
 	}
-	if err := db.Model(&usr.Post{}).Where("id = ?", body.PostId()).Update("is_approved", false).Error; err != nil {
+	pid := uint(body.PostId())
+	var p usr.Post
+	if err := db.First(&p, pid).Error; err != nil {
+		return fbcodec.SendError(c, 404, "post not found")
+	}
+	if p.IsApproved {
+		return fbcodec.SendError(c, 400, "post is not pending")
+	}
+	var imageURLs []string
+	if len(p.Images) > 0 {
+		_ = json.Unmarshal(p.Images, &imageURLs)
+	}
+	cld.DestroyDeliveryURLs(imageURLs)
+	if err := db.Exec(`DELETE FROM post_likes WHERE post_id = ?`, pid).Error; err != nil {
+		return fbcodec.SendError(c, 500, "failed to delete likes")
+	}
+	if err := db.Delete(&usr.Post{}, pid).Error; err != nil {
 		return fbcodec.SendError(c, 500, "failed to reject post")
 	}
 	return fbcodec.SendEmpty(c, 200, "post rejected")

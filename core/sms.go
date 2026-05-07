@@ -2,7 +2,9 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -94,9 +96,12 @@ func sendWithAfricasTalking(phoneNumber string, otp int) error {
 		form.Set("from", sender)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, "https://api.africastalking.com/version1/messaging", strings.NewReader(form.Encode()))
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.africastalking.com/version1/messaging", strings.NewReader(form.Encode()))
 	if err != nil {
-		return err
+		return fmt.Errorf("africastalking request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("apiKey", apiKey)
@@ -104,12 +109,56 @@ func sendWithAfricasTalking(phoneNumber string, otp int) error {
 	client := &http.Client{Timeout: 15 * time.Second}
 	res, err := client.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("africastalking send: %w", err)
 	}
 	defer res.Body.Close()
 
+	body, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return fmt.Errorf("SMS provider returned status %d", res.StatusCode)
+		msg := strings.TrimSpace(string(body))
+		if msg == "" {
+			return fmt.Errorf("africastalking returned status %d", res.StatusCode)
+		}
+		return fmt.Errorf("africastalking returned status %d: %s", res.StatusCode, msg)
+	}
+
+	if err := validateAfricasTalkingResponse(body); err != nil {
+		return fmt.Errorf("africastalking response not accepted: %w", err)
 	}
 	return nil
+}
+
+type atSMSResponse struct {
+	SMSMessageData struct {
+		Recipients []struct {
+			Number    string `json:"number"`
+			Status    string `json:"status"`
+			StatusCode int   `json:"statusCode,string"`
+			MessageID string `json:"messageId"`
+		} `json:"recipients"`
+	} `json:"SMSMessageData"`
+}
+
+func validateAfricasTalkingResponse(body []byte) error {
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return fmt.Errorf("empty response body")
+	}
+	var resp atSMSResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return fmt.Errorf("invalid JSON response: %w", err)
+	}
+	if len(resp.SMSMessageData.Recipients) == 0 {
+		return fmt.Errorf("no recipients in provider response")
+	}
+	for _, r := range resp.SMSMessageData.Recipients {
+		status := strings.ToLower(strings.TrimSpace(r.Status))
+		accepted := strings.Contains(status, "success") || strings.Contains(status, "sent") || r.StatusCode == 101 || r.StatusCode == 100
+		if accepted {
+			return nil
+		}
+	}
+	r := resp.SMSMessageData.Recipients[0]
+	return fmt.Errorf("recipient status=%q code=%d number=%q", strings.TrimSpace(r.Status), r.StatusCode, strings.TrimSpace(r.Number))
 }

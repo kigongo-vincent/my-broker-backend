@@ -1,12 +1,14 @@
 package db
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strings"
 
 	user "github.com/kigongo-vincent/my-broker-backend/User"
 	"github.com/kigongo-vincent/my-broker-backend/core"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -19,6 +21,16 @@ func EnsureDefaultAdminFromEnv(db *gorm.DB) error {
 	normalizedPhone, err := core.NormalizeUGPhoneNumber(phoneRaw)
 	if err != nil {
 		return err
+	}
+
+	adminPin := strings.TrimSpace(os.Getenv("ADMIN_PIN"))
+	var pinHash string
+	if adminPin != "" {
+		h, herr := bcrypt.GenerateFromPassword([]byte(adminPin), bcrypt.DefaultCost)
+		if herr != nil {
+			return fmt.Errorf("ADMIN_PIN bcrypt: %w", herr)
+		}
+		pinHash = string(h)
 	}
 
 	name := strings.TrimSpace(os.Getenv("ADMIN_NAME"))
@@ -47,11 +59,15 @@ func EnsureDefaultAdminFromEnv(db *gorm.DB) error {
 			IsBroker:    false,
 			ShowContact: true,
 			AcceptedPS:  true,
+			PinHash:     pinHash,
 		}
 		if err := db.Create(&admin).Error; err != nil {
 			return err
 		}
 		log.Printf("created bootstrap admin user with phone %s", normalizedPhone)
+		if adminPin != "" {
+			log.Printf("bootstrap admin PIN set from ADMIN_PIN env")
+		}
 		return nil
 	}
 
@@ -65,9 +81,15 @@ func EnsureDefaultAdminFromEnv(db *gorm.DB) error {
 	if email != "" {
 		updates["email"] = email
 	}
+	if pinHash != "" {
+		updates["pin_hash"] = pinHash
+	}
 	if err := db.Model(&existing).Updates(updates).Error; err != nil {
 		return err
 	}
 	log.Printf("ensured bootstrap admin privileges for user %d", existing.ID)
+	if adminPin != "" {
+		log.Printf("bootstrap admin PIN updated from ADMIN_PIN env")
+	}
 	return nil
 }

@@ -2,8 +2,8 @@ package user
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,6 +15,7 @@ import (
 	"github.com/kigongo-vincent/my-broker-backend/core"
 	"github.com/kigongo-vincent/my-broker-backend/fbcodec"
 	"github.com/kigongo-vincent/my-broker-backend/fbs/gen/mybroker"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -64,7 +65,20 @@ func roomChatAggregates(db *gorm.DB, roomIDs []uint, viewerUserID uint) (lastByR
 	return lastByRoom, unreadByRoom, nil
 }
 
-func RequestOTP(c *fiber.Ctx, db *gorm.DB) error {
+func validatePIN(pin string) error {
+	if len(pin) < 4 || len(pin) > 8 {
+		return fmt.Errorf("PIN must be 4–8 digits")
+	}
+	for _, r := range pin {
+		if r < '0' || r > '9' {
+			return fmt.Errorf("PIN must be numeric")
+		}
+	}
+	return nil
+}
+
+// CheckPhoneForPin tells the client whether to collect a new PIN (201) or sign in with PIN (202). No SMS / OTP.
+func CheckPhoneForPin(c *fiber.Ctx, db *gorm.DB) error {
 	req, err := fbcodec.OpenRequest(c.Body())
 	if err != nil {
 		return fbcodec.SendError(c, 400, err.Error())
@@ -73,85 +87,118 @@ func RequestOTP(c *fiber.Ctx, db *gorm.DB) error {
 	if err != nil {
 		return fbcodec.SendError(c, 400, err.Error())
 	}
-	otpVal := rand.Intn(9000) + 1000
 	normalizedPhone, err := core.NormalizeUGPhoneNumber(phoneRaw)
 	if err != nil {
 		return fbcodec.SendError(c, 400, err.Error())
 	}
-	newUser := User{PhoneNumber: normalizedPhone, OTP: otpVal}
 	var existing User
 	lookup := db.Where("phone_number IN ?", core.UGPhoneCandidates(normalizedPhone)).Limit(1).Find(&existing)
 	if lookup.Error != nil {
 		return fbcodec.SendError(c, 500, lookup.Error.Error())
 	}
 	if lookup.RowsAffected == 0 {
-		if err := db.Create(&newUser).Error; err != nil {
-			return fbcodec.SendError(c, 400, err.Error())
-		}
-		if err := core.SendOTP(newUser.PhoneNumber, newUser.OTP); err != nil {
-			return fbcodec.SendOTP(c, 201, "OTP generated for "+newUser.PhoneNumber, "sms delivery failed", int32(newUser.OTP))
-		}
-		if os.Getenv("SMS_DRY_RUN") == "true" {
-			return fbcodec.SendOTP(c, 201, "OTP has been send to "+newUser.PhoneNumber, "", int32(newUser.OTP))
-		}
-		return fbcodec.SendOTP(c, 201, "OTP has been send to "+newUser.PhoneNumber, "", 0)
+		return fbcodec.SendOTP(c, 201, "Create a PIN for this number", "", 0)
 	}
 	if existing.PhoneNumber != normalizedPhone {
 		if err := db.Model(&existing).Update("phone_number", normalizedPhone).Error; err != nil {
 			return fbcodec.SendError(c, 400, err.Error())
 		}
 	}
-	existing.OTP = otpVal
-	if err := db.Model(&existing).Update("otp", existing.OTP).Error; err != nil {
-		return fbcodec.SendError(c, 400, err.Error())
+	if existing.PinHash == "" {
+		return fbcodec.SendOTP(c, 201, "Set a PIN for your account", "", 0)
 	}
-	if err := core.SendOTP(normalizedPhone, existing.OTP); err != nil {
-		return fbcodec.SendOTP(c, 202, "OTP generated for "+normalizedPhone, "sms delivery failed", int32(existing.OTP))
-	}
-	if os.Getenv("SMS_DRY_RUN") == "true" {
-		return fbcodec.SendOTP(c, 202, "OTP has been send to "+normalizedPhone, "", int32(existing.OTP))
-	}
-	return fbcodec.SendOTP(c, 202, "OTP has been send to "+normalizedPhone, "", 0)
+	return fbcodec.SendOTP(c, 202, "Enter your PIN", "", 0)
 }
 
-func VerifyOTP(c *fiber.Ctx, db *gorm.DB) error {
+// CompletePhonePin registers (pin + matching confirm), sets first PIN on legacy users, or logs in (pin only).
+func CompletePhonePin(c *fiber.Ctx, db *gorm.DB) error {
 	req, err := fbcodec.OpenRequest(c.Body())
-	if err != nil {
-		return fbcodec.SendError(c, 400, "failed to retrieve OTP"+err.Error())
-	}
-	v, err := ParseVerifyOtp(req)
 	if err != nil {
 		return fbcodec.SendError(c, 400, err.Error())
 	}
-	otp := int(v.Otp())
-	if otp == 0 {
-		return fbcodec.SendError(c, 400, "Invalid OTP format")
+	p, err := ParsePhonePin(req)
+	if err != nil {
+		return fbcodec.SendError(c, 400, err.Error())
 	}
-	var foundUser User
-	lookup := db.Where("otp = ?", otp)
-	if pn := string(v.PhoneNumber()); pn != "" {
-		normalizedPhone, err := core.NormalizeUGPhoneNumber(pn)
-		if err != nil {
+	phoneRaw := string(p.PhoneNumber())
+	pin := string(p.Pin())
+	confirm := string(p.PinConfirm())
+	if err := validatePIN(pin); err != nil {
+		return fbcodec.SendError(c, 400, err.Error())
+	}
+	normalizedPhone, err := core.NormalizeUGPhoneNumber(phoneRaw)
+	if err != nil {
+		return fbcodec.SendError(c, 400, err.Error())
+	}
+	cands := core.UGPhoneCandidates(normalizedPhone)
+
+	if confirm != "" {
+		if err := validatePIN(confirm); err != nil {
 			return fbcodec.SendError(c, 400, err.Error())
 		}
-		lookup = lookup.Where("phone_number IN ?", core.UGPhoneCandidates(normalizedPhone))
-	} else if em := string(v.Email()); em != "" {
-		lookup = lookup.Where("email = ?", em)
-	} else {
-		return fbcodec.SendError(c, 400, "phone number or email is required")
+		if pin != confirm {
+			return fbcodec.SendError(c, 400, "PINs do not match")
+		}
+		var u User
+		err := db.Where("phone_number IN ?", cands).First(&u).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			hash, herr := bcrypt.GenerateFromPassword([]byte(pin), bcrypt.DefaultCost)
+			if herr != nil {
+				return fbcodec.SendError(c, 500, "could not set PIN")
+			}
+			u = User{
+				PhoneNumber: normalizedPhone,
+				PinHash:     string(hash),
+				Verified:    "false",
+			}
+			if err := db.Create(&u).Error; err != nil {
+				return fbcodec.SendError(c, 400, err.Error())
+			}
+			token, terr := core.IssueJWT(u.ID)
+			if terr != nil {
+				return fbcodec.SendError(c, 500, "failed to issue auth token")
+			}
+			return fbcodec.SendAuthOK(c, "welcome", token, UserToIn(u))
+		}
+		if err != nil {
+			return fbcodec.SendError(c, 500, err.Error())
+		}
+		if u.PinHash != "" {
+			return fbcodec.SendError(c, 400, "this number already has a PIN; sign in instead")
+		}
+		hash, herr := bcrypt.GenerateFromPassword([]byte(pin), bcrypt.DefaultCost)
+		if herr != nil {
+			return fbcodec.SendError(c, 500, "could not set PIN")
+		}
+		if err := db.Model(&u).Update("pin_hash", string(hash)).Error; err != nil {
+			return fbcodec.SendError(c, 500, err.Error())
+		}
+		u.PinHash = string(hash)
+		token, terr := core.IssueJWT(u.ID)
+		if terr != nil {
+			return fbcodec.SendError(c, 500, "failed to issue auth token")
+		}
+		return fbcodec.SendAuthOK(c, "PIN set successfully", token, UserToIn(u))
 	}
-	if err := lookup.First(&foundUser).Error; err != nil {
-		return fbcodec.SendError(c, 400, "invalid credentials submitted"+err.Error())
+
+	var u User
+	if err := db.Where("phone_number IN ?", cands).First(&u).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fbcodec.SendError(c, 400, "no account for this number")
+		}
+		return fbcodec.SendError(c, 500, err.Error())
 	}
-	token, err := core.IssueJWT(foundUser.ID)
-	if err != nil {
+	if u.PinHash == "" {
+		return fbcodec.SendError(c, 400, "set your PIN first")
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(u.PinHash), []byte(pin)); err != nil {
+		return fbcodec.SendError(c, 400, "wrong PIN")
+	}
+	token, terr := core.IssueJWT(u.ID)
+	if terr != nil {
 		return fbcodec.SendError(c, 500, "failed to issue auth token")
 	}
-	foundUser.OTP = 0
-	if err := db.Save(&foundUser).Error; err != nil {
-		return fbcodec.SendError(c, 400, "Failed to clear the otp")
-	}
-	return fbcodec.SendAuthOK(c, "otp verified successfully", token, UserToIn(foundUser))
+	return fbcodec.SendAuthOK(c, "signed in", token, UserToIn(u))
 }
 
 func GoogleSignin(c *fiber.Ctx, db *gorm.DB) error {
@@ -204,6 +251,7 @@ func upsertGoogleUser(db *gorm.DB, profile GoogleProfile) (User, error) {
 		Photo:       profile.Picture,
 		PhoneNumber: fmt.Sprintf("g_%d", time.Now().UnixNano()),
 		Status:      "user",
+		Verified:    "false",
 	}
 	if err := db.Where("email = ?", email).Attrs(createCandidate).FirstOrCreate(&foundUser).Error; err != nil {
 		return User{}, err
@@ -480,10 +528,10 @@ func UpdateID(c *fiber.Ctx, db *gorm.DB) error {
 	default:
 		return core.ThrowNewError(c, "failed to parse body")
 	}
-	if err := db.Model(&uu).Update("otp", rand.Intn(9000)+1000).Update(column, val).Error; err != nil {
-		return core.ThrowNewError(c, "failed to generate OTP")
+	if err := db.Model(&uu).Update(column, val).Error; err != nil {
+		return core.ThrowNewError(c, "failed to update profile")
 	}
-	return fbcodec.SendEmpty(c, 200, "otp generated successfully")
+	return fbcodec.SendEmpty(c, 200, "updated successfully")
 }
 
 func UpdateLastSeen(c *fiber.Ctx, db *gorm.DB) error {

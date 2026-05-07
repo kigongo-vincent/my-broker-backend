@@ -14,17 +14,10 @@ func RegisterRoutes(app *fiber.App, DB *gorm.DB) {
 	user := app.Group("/auth")
 
 	user.Post("/signin", func(c *fiber.Ctx) error {
-		return RequestOTP(c, DB)
+		return CheckPhoneForPin(c, DB)
 	})
 	user.Post("/verify-otp", func(c *fiber.Ctx) error {
-		return VerifyOTP(c, DB)
-	})
-	user.Post("/google", func(c *fiber.Ctx) error {
-		return GoogleSignin(c, DB)
-	})
-	user.Get("/google/web/start", GoogleWebOAuthStart)
-	user.Get("/google/web/callback", func(c *fiber.Ctx) error {
-		return GoogleWebOAuthCallback(c, DB)
+		return CompletePhonePin(c, DB)
 	})
 	user.Get("/verification-status", middleware.AuthMiddlewareJSON(), func(c *fiber.Ctx) error {
 		return GetVerificationStatusJSON(c, DB)
@@ -77,6 +70,9 @@ func RegisterRoutes(app *fiber.App, DB *gorm.DB) {
 		return ClearChat(c, DB)
 	})
 
+	user.Get("/admin/id-verifications/pending", middleware.AuthMiddlewareJSON(), func(c *fiber.Ctx) error {
+		return ListPendingIDVerificationsForAdmin(c, DB)
+	})
 	user.Get("/admin/users", middleware.AuthMiddleware(), func(c *fiber.Ctx) error {
 		return ListUsersForAdmin(c, DB)
 	})

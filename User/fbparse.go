@@ -33,6 +33,19 @@ func ParseVerifyOtp(req *mybroker.RequestEnv) (*mybroker.VerifyOtpBody, error) {
 	return &v, nil
 }
 
+func ParsePhonePin(req *mybroker.RequestEnv) (*mybroker.PhonePinBody, error) {
+	if req.BodyType() != mybroker.ReqPayloadPhonePinBody {
+		return nil, fmt.Errorf("expected PhonePinBody")
+	}
+	var t flatbuffers.Table
+	if !req.Body(&t) {
+		return nil, fmt.Errorf("missing body")
+	}
+	var p mybroker.PhonePinBody
+	p.Init(t.Bytes, t.Pos)
+	return &p, nil
+}
+
 func ParseGoogleAuth(req *mybroker.RequestEnv) (*mybroker.GoogleAuthBody, error) {
 	if req.BodyType() != mybroker.ReqPayloadGoogleAuthBody {
 		return nil, fmt.Errorf("expected GoogleAuthBody")
