@@ -69,6 +69,9 @@ func RegisterRoutes(app *fiber.App, DB *gorm.DB) {
 	user.Post("/chat/clear", middleware.AuthMiddleware(), func(c *fiber.Ctx) error {
 		return ClearChat(c, DB)
 	})
+	user.Post("/chat/delete-room", middleware.AuthMiddleware(), func(c *fiber.Ctx) error {
+		return DeleteChatRoom(c, DB)
+	})
 
 	user.Get("/admin/id-verifications/pending", middleware.AuthMiddlewareJSON(), func(c *fiber.Ctx) error {
 		return ListPendingIDVerificationsForAdmin(c, DB)

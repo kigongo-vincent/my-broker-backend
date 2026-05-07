@@ -648,6 +648,42 @@ func ClearChat(c *fiber.Ctx, db *gorm.DB) error {
 	return fbcodec.SendEmpty(c, 200, "chat cleared")
 }
 
+func DeleteChatRoom(c *fiber.Ctx, db *gorm.DB) error {
+	authUserID, ok := c.Locals("userID").(uint)
+	if !ok || authUserID == 0 {
+		return fbcodec.SendError(c, 401, "unauthorized")
+	}
+	req, err := fbcodec.OpenRequest(c.Body())
+	if err != nil {
+		return fbcodec.SendError(c, 400, "invalid room id")
+	}
+	body, err := ParseRoomID(req)
+	if err != nil || body.RoomId() == 0 {
+		return fbcodec.SendError(c, 400, "invalid room id")
+	}
+	roomID := uint(body.RoomId())
+	var rel UserRoom
+	if err := db.Where("room_id = ? AND user_id = ?", roomID, authUserID).First(&rel).Error; err != nil {
+		return fbcodec.SendError(c, 403, "forbidden")
+	}
+	if err := db.Where("room_id = ? AND user_id = ?", roomID, authUserID).Delete(&UserRoom{}).Error; err != nil {
+		return fbcodec.SendError(c, 500, "failed to leave room")
+	}
+	var remaining int64
+	if err := db.Model(&UserRoom{}).Where("room_id = ?", roomID).Count(&remaining).Error; err != nil {
+		return fbcodec.SendError(c, 500, "failed to inspect room members")
+	}
+	if remaining == 0 {
+		if err := db.Where("room_id = ?", roomID).Delete(&Message{}).Error; err != nil {
+			return fbcodec.SendError(c, 500, "failed to delete room messages")
+		}
+		if err := db.Delete(&Room{}, roomID).Error; err != nil {
+			return fbcodec.SendError(c, 500, "failed to delete room")
+		}
+	}
+	return fbcodec.SendEmpty(c, 200, "room deleted")
+}
+
 func ListUsersForAdmin(c *fiber.Ctx, db *gorm.DB) error {
 	adminID := c.Locals("userID").(uint)
 	var admin User

@@ -464,7 +464,11 @@ func DeleteMyPost(c *fiber.Ctx, db *gorm.DB) error {
 	if err := db.First(&p, pid).Error; err != nil {
 		return fbcodec.SendError(c, 404, "post not found")
 	}
-	if p.UserID != uid {
+	var actor usr.User
+	if err := db.First(&actor, uid).Error; err != nil {
+		return fbcodec.SendError(c, 401, "unauthorized")
+	}
+	if p.UserID != uid && actor.Status != "admin" {
 		return fbcodec.SendError(c, 403, "forbidden")
 	}
 	if err := db.Exec(`DELETE FROM post_likes WHERE post_id = ?`, pid).Error; err != nil {
@@ -494,7 +498,11 @@ func SetMyPostAvailability(c *fiber.Ctx, db *gorm.DB) error {
 	if err := db.First(&p, uint(postID)).Error; err != nil {
 		return fbcodec.SendError(c, 404, "post not found")
 	}
-	if p.UserID != uid {
+	var actor usr.User
+	if err := db.First(&actor, uid).Error; err != nil {
+		return fbcodec.SendError(c, 401, "unauthorized")
+	}
+	if p.UserID != uid && actor.Status != "admin" {
 		return fbcodec.SendError(c, 403, "forbidden")
 	}
 	if err := db.Model(&p).Update("is_available", available).Error; err != nil {
