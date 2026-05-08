@@ -28,11 +28,14 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		userID := c.Locals("userID").(uint)
 		return GetPostsByCreator(c, db, userID)
 	})
-	posts.Get("/post", func(c *fiber.Ctx) error {
+	posts.Get("/post", middleware.OptionalAuthMiddleware(), func(c *fiber.Ctx) error {
 		return GetPostDetails(c, db)
 	})
 	posts.Post("/mine/delete", middleware.AuthMiddleware(), func(c *fiber.Ctx) error {
 		return DeleteMyPost(c, db)
+	})
+	posts.Post("/mine/update", middleware.AuthMiddleware(), func(c *fiber.Ctx) error {
+		return UpdateMyPost(c, db)
 	})
 	posts.Get("/mine/availability", middleware.AuthMiddleware(), func(c *fiber.Ctx) error {
 		return SetMyPostAvailability(c, db)

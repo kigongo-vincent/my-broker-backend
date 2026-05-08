@@ -16,57 +16,57 @@ services:
       timeout: 5s
       retries: 5
 
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: my-broker-api
-    env_file:
-      - .env
-    environment:
-      # Overrides PORT from env_file so published 3000:3000 matches Caddy upstream.
-      PORT: "3000"
-      DB_HOST: database
-      DB_PORT: "5432"
-      DB_USER: admin
-      DB_PASSWORD: Admin@2025
-      DB_NAME: my_broker_db4
-      JWT_SECRET: ${JWT_SECRET:-replace_me}
-      GOOGLE_WEB_CLIENT_ID: ${GOOGLE_WEB_CLIENT_ID:-}
-      GOOGLE_WEB_CLIENT_SECRET: ${GOOGLE_WEB_CLIENT_SECRET:-}
-      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-}
-      WEB_APP_ORIGIN: ${WEB_APP_ORIGIN:-http://localhost:8081}
-      PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:3000}
-      CLOUDINARY_URL: ${CLOUDINARY_URL:-}
-      DB_SEED: ${DB_SEED:-false}
-      SMS_PROVIDER: ${SMS_PROVIDER:-africastalking}
-      SMS_DRY_RUN: ${SMS_DRY_RUN:-true}
-      SMS_API_KEY: ${SMS_API_KEY:-}
-      AT_USERNAME: ${AT_USERNAME:-sandbox}
-      AT_API_KEY: ${AT_API_KEY:-}
-      AT_SENDER_ID: ${AT_SENDER_ID:-}
-    ports:
-      - "3000:3000"
-    expose:
-      - "3000"
-    depends_on:
-      database:
-        condition: service_healthy
+#   api:
+#     build:
+#       context: .
+#       dockerfile: Dockerfile
+#     container_name: my-broker-api
+#     env_file:
+#       - .env
+#     environment:
+#       # Overrides PORT from env_file so published 3000:3000 matches Caddy upstream.
+#       PORT: "3000"
+#       DB_HOST: database
+#       DB_PORT: "5432"
+#       DB_USER: admin
+#       DB_PASSWORD: Admin@2025
+#       DB_NAME: my_broker_db4
+#       JWT_SECRET: ${JWT_SECRET:-replace_me}
+#       GOOGLE_WEB_CLIENT_ID: ${GOOGLE_WEB_CLIENT_ID:-}
+#       GOOGLE_WEB_CLIENT_SECRET: ${GOOGLE_WEB_CLIENT_SECRET:-}
+#       GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-}
+#       WEB_APP_ORIGIN: ${WEB_APP_ORIGIN:-http://localhost:8081}
+#       PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:3000}
+#       CLOUDINARY_URL: ${CLOUDINARY_URL:-}
+#       DB_SEED: ${DB_SEED:-false}
+#       SMS_PROVIDER: ${SMS_PROVIDER:-africastalking}
+#       SMS_DRY_RUN: ${SMS_DRY_RUN:-true}
+#       SMS_API_KEY: ${SMS_API_KEY:-}
+#       AT_USERNAME: ${AT_USERNAME:-sandbox}
+#       AT_API_KEY: ${AT_API_KEY:-}
+#       AT_SENDER_ID: ${AT_SENDER_ID:-}
+#     ports:
+#       - "3000:3000"
+#     expose:
+#       - "3000"
+#     depends_on:
+#       database:
+#         condition: service_healthy
 
-  caddy:
-    image: caddy:2-alpine
-    container_name: my-broker-caddy
-    ports:
-      - "443:443"
-      - "443:443/udp"
-    environment:
-      CADDY_UPSTREAM: api:3000
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - api
+#   caddy:
+#     image: caddy:2-alpine
+#     container_name: my-broker-caddy
+#     ports:
+#       - "443:443"
+#       - "443:443/udp"
+#     environment:
+#       CADDY_UPSTREAM: api:3000
+#     volumes:
+#       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+#       - caddy_data:/data
+#       - caddy_config:/config
+#     depends_on:
+#       - api
 
 volumes:
   pgdata:

@@ -480,6 +480,77 @@ func DeleteMyPost(c *fiber.Ctx, db *gorm.DB) error {
 	return fbcodec.SendEmpty(c, 200, "post deleted")
 }
 
+// UpdateMyPost updates mutable listing fields for the authenticated owner/admin.
+func UpdateMyPost(c *fiber.Ctx, db *gorm.DB) error {
+	uid, ok := c.Locals("userID").(uint)
+	if !ok || uid == 0 {
+		return fbcodec.SendError(c, 401, "unauthorized")
+	}
+	postID, err := strconv.ParseUint(c.Query("post_id"), 10, 32)
+	if err != nil || postID == 0 {
+		return fbcodec.SendError(c, 400, "invalid post_id")
+	}
+	req, err := fbcodec.OpenRequest(c.Body())
+	if err != nil {
+		return fbcodec.SendError(c, 400, err.Error())
+	}
+	body, err := ParseCreatePostBody(req)
+	if err != nil {
+		return fbcodec.SendError(c, 400, err.Error())
+	}
+	next, err := PostFromCreateBody(body)
+	if err != nil {
+		return fbcodec.SendError(c, 400, err.Error())
+	}
+	if !next.ReviewDisclaimerAgreed {
+		return fbcodec.SendError(c, 400, "review disclaimer must be accepted")
+	}
+
+	var existing usr.Post
+	if err := db.First(&existing, uint(postID)).Error; err != nil {
+		return fbcodec.SendError(c, 404, "post not found")
+	}
+	var actor usr.User
+	if err := db.First(&actor, uid).Error; err != nil {
+		return fbcodec.SendError(c, 401, "unauthorized")
+	}
+	if existing.UserID != uid && actor.Status != "admin" {
+		return fbcodec.SendError(c, 403, "forbidden")
+	}
+
+	existing.Price = next.Price
+	existing.Location = next.Location
+	existing.Bedrooms = next.Bedrooms
+	existing.Bathrooms = next.Bathrooms
+	existing.Toilets = next.Toilets
+	existing.Images = next.Images
+	existing.Ammenities = next.Ammenities
+	existing.PayWaterBills = next.PayWaterBills
+	existing.PayElectricityBills = next.PayElectricityBills
+	existing.PayForTrash = next.PayForTrash
+	existing.HasParking = next.HasParking
+	existing.RequiredFirstMonthsPaid = next.RequiredFirstMonthsPaid
+	existing.Units = next.Units
+	existing.IsNegotiable = next.IsNegotiable
+	existing.ReviewDisclaimerAgreed = next.ReviewDisclaimerAgreed
+	existing.Type = next.Type
+
+	// Non-admin listing edits require re-approval.
+	if actor.Status != "admin" {
+		existing.IsApproved = false
+	}
+
+	if err := db.Save(&existing).Error; err != nil {
+		return fbcodec.SendError(c, 500, "failed to update post")
+	}
+	if err := db.Preload("User").Preload("Likers").First(&existing, existing.ID).Error; err != nil {
+		return fbcodec.SendError(c, 500, "failed to load updated post")
+	}
+	return fbcodec.BuildAndSend(c, 200, "post updated successfully", "", "", 0, mybroker.ApiPayloadPostList, 16384, func(b *flatbuffers.Builder) flatbuffers.UOffsetT {
+		return fbcodec.BuildPostList(b, []fbcodec.PostIn{postModelToWire(existing)})
+	})
+}
+
 // SetMyPostAvailability sets is_available for the author's listing (hides from public feed when false).
 func SetMyPostAvailability(c *fiber.Ctx, db *gorm.DB) error {
 	uid, ok := c.Locals("userID").(uint)

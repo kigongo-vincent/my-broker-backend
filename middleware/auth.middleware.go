@@ -50,3 +50,22 @@ func AuthMiddlewareJSON() fiber.Handler {
 		return c.Next()
 	}
 }
+
+func OptionalAuthMiddleware() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		token := c.Get("Authorization")
+		if token == "" {
+			return c.Next()
+		}
+
+		if strings.HasPrefix(token, "Bearer ") {
+			token = strings.TrimPrefix(token, "Bearer ")
+		}
+
+		userID, err := core.ParseJWT(token)
+		if err == nil && userID != 0 {
+			c.Locals("userID", userID)
+		}
+		return c.Next()
+	}
+}

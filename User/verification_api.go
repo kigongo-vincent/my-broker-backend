@@ -77,9 +77,13 @@ type pendingIDVerificationRow struct {
 	Photo       string `json:"photo"`
 	SelfieURL   string `json:"selfie_url"`
 	DocumentURL string `json:"document_url"`
+	Status      string `json:"id_verification_status"`
+	Verified    string `json:"verified"`
 }
 
-// ListPendingIDVerificationsForAdmin returns users awaiting ID review (admin only).
+// ListPendingIDVerificationsForAdmin returns reviewable users for admin:
+// - submitted/approved ID-verification rows
+// - any verified users (even when legacy rows have no stored docs)
 func ListPendingIDVerificationsForAdmin(c *fiber.Ctx, db *gorm.DB) error {
 	adminID, ok := c.Locals("userID").(uint)
 	if !ok || adminID == 0 {
@@ -90,7 +94,10 @@ func ListPendingIDVerificationsForAdmin(c *fiber.Ctx, db *gorm.DB) error {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"msg": "admin access required"})
 	}
 	var rows []User
-	if err := db.Where("id_verification_status = ?", "submitted").Order("updated_at DESC").Find(&rows).Error; err != nil {
+	if err := db.
+		Where("id_verification_status IN ? OR verified = ?", []string{"submitted", "approved"}, "true").
+		Order("updated_at DESC").
+		Find(&rows).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"msg": "failed to fetch verification queue"})
 	}
 	out := make([]pendingIDVerificationRow, 0, len(rows))
@@ -108,6 +115,8 @@ func ListPendingIDVerificationsForAdmin(c *fiber.Ctx, db *gorm.DB) error {
 			Photo:       u.Photo,
 			SelfieURL:   u.IDVerificationSelfie,
 			DocumentURL: u.IDVerificationDocument,
+			Status:      strings.TrimSpace(u.IDVerificationStatus),
+			Verified:    strings.TrimSpace(u.Verified),
 		})
 	}
 	return c.JSON(out)

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -690,8 +691,27 @@ func ListUsersForAdmin(c *fiber.Ctx, db *gorm.DB) error {
 	if err := db.First(&admin, adminID).Error; err != nil || admin.Status != "admin" {
 		return fbcodec.SendError(c, 403, "admin access required")
 	}
+	page := 1
+	limit := 30
+	if q := c.Query("page"); q != "" {
+		n, err := strconv.Atoi(q)
+		if err != nil || n < 1 {
+			return fbcodec.SendError(c, 400, "invalid page")
+		}
+		page = n
+	}
+	if q := c.Query("limit"); q != "" {
+		n, err := strconv.Atoi(q)
+		if err != nil || n < 1 {
+			return fbcodec.SendError(c, 400, "invalid limit")
+		}
+		if n > 100 {
+			n = 100
+		}
+		limit = n
+	}
 	var users []User
-	if err := db.Order("created_at DESC").Find(&users).Error; err != nil {
+	if err := db.Order("created_at DESC").Offset((page - 1) * limit).Limit(limit).Find(&users).Error; err != nil {
 		return fbcodec.SendError(c, 500, "failed to fetch users")
 	}
 	userPins := make([]fbcodec.UserIn, len(users))

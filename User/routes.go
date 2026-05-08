@@ -79,6 +79,12 @@ func RegisterRoutes(app *fiber.App, DB *gorm.DB) {
 	user.Get("/admin/users", middleware.AuthMiddleware(), func(c *fiber.Ctx) error {
 		return ListUsersForAdmin(c, DB)
 	})
+	user.Post("/admin/users/update", middleware.AuthMiddlewareJSON(), func(c *fiber.Ctx) error {
+		return AdminUpdateUserJSON(c, DB)
+	})
+	user.Post("/admin/users/delete", middleware.AuthMiddlewareJSON(), func(c *fiber.Ctx) error {
+		return AdminDeleteUserJSON(c, DB)
+	})
 	user.Post("/admin/approve-id", middleware.AuthMiddleware(), func(c *fiber.Ctx) error {
 		return ApproveUserID(c, DB)
 	})
